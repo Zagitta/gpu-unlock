@@ -52,7 +52,9 @@ there, before `nvidia` can bind a card:
   built with `-c <config>` or a preset `_config`; put `gpu_unlock` right
   before `nvidia` in that config's `MODULES` yourself.
 - **initramfs-tools:** `/usr/share/initramfs-tools/modules.d/gpu-unlock.conf`.
-- **dracut:** `/usr/lib/dracut/dracut.conf.d/gpu-unlock.conf`.
+- **dracut:** `/usr/lib/dracut/dracut.conf.d/gpu-unlock.conf`. The packages
+  rebuild the running kernel's initramfs on install and removal; new
+  kernels pick the drop-in up automatically when they are installed.
 
 There is no `softdep nvidia pre:` rule: kmod honours only the first
 `softdep nvidia` line it reads, so other packages' rules (`nvidia-utils`,

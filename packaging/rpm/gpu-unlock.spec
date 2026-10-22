@@ -24,6 +24,7 @@ NVIDIA driver binds, opted in on the kernel command line.
 %package dkms
 Summary: RTX 3090 BF16 unlock kernel source
 Requires: dkms
+Requires: dracut
 Requires: gpu-unlock-firmware = %{version}-%{release}
 
 %description dkms
@@ -67,11 +68,38 @@ make DESTDIR=%{buildroot} ASSETS="$PWD/assets" \
 
 %post dkms
 dkms add -m gpu-unlock -v %{version} --rpm_safe_upgrade || :
+# dkms add only registers the source; build and install the module for the
+# running kernel, then rebuild its initramfs so the module and its firmware
+# are in the image before nvidia can load. New kernels pick the drop-in up
+# automatically when they are installed (dkms autoinstalls for them).
+dkms build -m gpu-unlock -v %{version} --force || :
+dkms install -m gpu-unlock -v %{version} --force || :
+if [ -x /usr/sbin/dracut ]; then dracut --force || :; fi
 
 %preun dkms
-if [ "$1" -eq 0 ] && [ -d /var/lib/dkms/gpu-unlock/%{version} ]; then
-    dkms remove -m gpu-unlock -v %{version} --all --rpm_safe_upgrade || :
+if [ "$1" -eq 0 ]; then
+    # dkms remove can leave weak-updates symlinks for other kernels
+    # behind; drop them and refresh the module maps of every kernel
+    # before dkms remove: dkms only runs depmod for the kernel the
+    # module was built for, and a later dracut run (dkms itself can
+    # have a post_transaction hook) would fail on dangling entries.
+    rm -f /lib/modules/*/weak-updates/gpu_unlock.ko*
+    # depmod -a covers only the running kernel on kmod >= 31.
+    for k in /lib/modules/*; do [ -f "$k/config" ] && depmod "${k##*/}" || :; done
+    if [ -d /var/lib/dkms/gpu-unlock/%{version} ]; then
+        dkms remove -m gpu-unlock -v %{version} --all --rpm_safe_upgrade || :
+    fi
 fi
+
+%postun dkms
+# Drop gpu_unlock from the initramfs now that the module and the dracut
+# drop-in are gone.
+if [ "$1" -eq 0 ] && [ -x /usr/sbin/dracut ]; then dracut --force || :; fi
+
+%postun firmware
+# The firmware is gone from disk; refresh the initramfs after the dkms
+# package's postremove has already dropped the module.
+if [ "$1" -eq 0 ] && [ -x /usr/sbin/dracut ]; then dracut --force || :; fi
 
 %changelog
 * Mon Sep 28 2026 Zagitta <zetlon+github@gmail.com> - 1.0.0-1
