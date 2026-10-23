@@ -99,13 +99,18 @@ done
 # before nvidia. Fedora's and EPEL's dkms regenerate every image after an
 # install (post_transaction in framework.conf); otherwise rebuild those of
 # the kernels that can load it.
+#
+# Pass --force-drivers explicitly: when gpu_unlock is already loaded on the
+# running kernel (any in-place upgrade), dracut's hostonly mode picks the
+# module up as a loaded module and never runs the force_drivers drop-in, so
+# the firmware is left out of the rebuilt image.
 if command -v dracut >/dev/null &&
     ! grep -qs '^post_transaction=.*dracut' /etc/dkms/framework.conf \
         /etc/dkms/framework.conf.d/*.conf; then
     for d in /lib/modules/*/; do
         k=${d%/}; k=${k##*/}
         modinfo -k "$k" gpu_unlock >/dev/null 2>&1 &&
-            dracut --force --kver "$k" || :
+            dracut --force --kver "$k" --force-drivers gpu_unlock || :
     done
 fi
 
