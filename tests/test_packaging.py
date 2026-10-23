@@ -100,6 +100,10 @@ class PackageTests(unittest.TestCase):
                              "usr/lib/dracut/dracut.conf.d/gpu-unlock.conf",
                              "usr/share/doc/gpu-unlock/README.md"):
                 self.assertIn(expected, paths)
+            docs = [p.relative_to(ROOT).as_posix() for p in (ROOT / "docs").iterdir()]
+            self.assertTrue(docs)
+            for doc in docs:
+                self.assertIn(f"usr/share/doc/gpu-unlock/{doc}", paths)
             self.assertFalse(any(path.endswith(".mod.c") for path in paths))
             # Another package's "softdep nvidia" line would silently win over
             # ours (kmod honours only the first), so the order comes from the
@@ -111,6 +115,20 @@ class PackageTests(unittest.TestCase):
                 result = subprocess.run(["bash", "-c", f"MODULES=({before}); . {dropin}; echo ${{MODULES[*]}}"],
                                         capture_output=True, text=True, check=True)
                 self.assertEqual(result.stdout.strip(), after)
+
+    def test_docs_survive_source_archive(self):
+        # Packages build from `git archive HEAD`, which honours export-ignore.
+        top = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=ROOT,
+                             capture_output=True, text=True)
+        if top.returncode or Path(top.stdout.strip()) != ROOT:
+            self.skipTest("not a git checkout")
+        docs = subprocess.run(["git", "ls-files", "docs"], cwd=ROOT, capture_output=True,
+                              text=True, check=True).stdout.splitlines()
+        self.assertTrue(docs)
+        for doc in docs:
+            attr = subprocess.run(["git", "check-attr", "export-ignore", "--", doc],
+                                  cwd=ROOT, capture_output=True, text=True, check=True)
+            self.assertTrue(attr.stdout.rstrip().endswith(": unset"), attr.stdout)
 
     def test_pkgbuild_pins_match_manifest(self):
         manifest = json.loads((ROOT / "firmware/artifacts-610.43.03.json").read_text())
