@@ -68,8 +68,12 @@ install-dkms:
 	grep -q 'MODULE_VERSION("$(VERSION)")' kernel/gpu_unlock/main.c
 	install -Dm644 -t $(DESTDIR)$(DKMSDIR) $(MODULE_FILES)
 	install -Dm644 README.md $(DESTDIR)/usr/share/doc/gpu-unlock/README.md
-	install -Dm644 -t $(DESTDIR)/usr/share/doc/gpu-unlock/docs \
-		docs/STAGE1.md docs/STAGE1-TAIL-REPLAY.json docs/CMP-PORT-PLAN.md
+	# Install whatever docs exist; some are export-ignored from the release
+	# tarball and may be absent.
+	@find docs -maxdepth 1 -type f \( -name '*.md' -o -name '*.json' \) -print0 2>/dev/null | \
+	while IFS= read -r -d '' f; do \
+		install -Dm644 -t $(DESTDIR)/usr/share/doc/gpu-unlock/docs "$$f"; \
+	done
 
 # The generators check every file against its pinned SHA-256 before writing it.
 install-firmware:
