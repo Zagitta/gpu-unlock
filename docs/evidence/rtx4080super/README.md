@@ -1,7 +1,10 @@
 # RTX 4080 SUPER (AD103) evidence
 
-One card, one cold boot, driver 615.71.09 (open kernel module), firmware
-inputs pinned to 610.43.03. Ubuntu 26.04, kernel 7.0.0-38-generic, module
+One card, driver 615.71.09 (open kernel module), firmware inputs pinned
+to 610.43.03. `boot-log.txt` is the successful boot of the final PR HEAD
+(the rebased pre-refactor code); the benchmark tables were measured on the
+identical payload, selectors and silicon state in the port's first
+hardware run. Ubuntu 26.04, kernel 7.0.0-38-generic, module
 signed with a locally enrolled MOK and loaded by dracut before `nvidia`.
 
 - `boot-log.txt` — full transaction log of the successful boot
