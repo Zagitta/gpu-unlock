@@ -41,9 +41,16 @@
 #define BOOT_FILE_AD103 "gpu-unlock/610.43.03/gsp_boot_ad102.bin"
 #define BOOT_DESC_FILE_AD103 "gpu-unlock/610.43.03/gsp_boot_desc_ad102.bin"
 #define GU_AD103_RTX_4080_SUPER 0x2702u
+#define GU_AD106_RTX_4060_TI 0x2803u
 /* Explicit success marker the AD10x chain leaves in SEC2 mailbox0. */
 #define GU_AD103_MARKER 0x67b00001u
 #define GU_SPEED_READOUT_MASK 0x07ffffffu /* FEATURE_READOUT_1: nine 3-bit fields */
+
+static bool is_ad103(const struct pci_dev *pdev)
+{
+	return pdev->device == GU_AD103_RTX_4080_SUPER ||
+	       pdev->device == GU_AD106_RTX_4060_TI;
+}
 
 struct unlock_assets {
 	const char *booter, *v67, *boot, *desc;
@@ -62,18 +69,13 @@ static const struct unlock_assets *unlock_assets(const struct pci_dev *pdev)
 		.boot = BOOT_FILE_AD103, .desc = BOOT_DESC_FILE_AD103, .boot_size = 36864,
 	};
 
-	return pdev->device == GU_AD103_RTX_4080_SUPER ? &ad103 : &ga102;
+	return is_ad103(pdev) ? &ad103 : &ga102;
 }
 
 struct unlock_transaction_page {
 	void *cpu;
 	dma_addr_t dma;
 };
-
-static bool is_ad103(const struct pci_dev *pdev)
-{
-	return pdev->device == GU_AD103_RTX_4080_SUPER;
-}
 
 struct unlock_transaction_work {
 	struct pci_dev *pdev;
@@ -425,7 +427,7 @@ static int ad103_sample_permissions(struct unlock_transaction_work *work,
 		valid = !read_bar(work, ad103_permissions[i].offset, &values[i]) &&
 			(values[i] & 0xffff0000u) != 0xbadf0000u && accessible;
 		dev_info(&work->pdev->dev,
-			 "AD103 permission %s: %s[%#x]=%#x expected=%#x required=%u valid=%u pci=%#x\n",
+			 "AD10x permission %s: %s[%#x]=%#x expected=%#x required=%u valid=%u pci=%#x\n",
 			 phase, ad103_permissions[i].name, ad103_permissions[i].offset,
 			 values[i], ad103_permissions[i].expected,
 			 ad103_permissions[i].required, valid, identity);
@@ -445,7 +447,7 @@ static int ad103_readout(struct unlock_transaction_work *work, const char *phase
 	bool valid = !ret && !inaccessible(value);
 
 	dev_info(&work->pdev->dev,
-		 "AD103 %s: readout1=%#x fields=%u %u %u %u %u %u %u %u %u valid=%u full=%u\n",
+		 "AD10x %s: readout1=%#x fields=%u %u %u %u %u %u %u %u %u valid=%u full=%u\n",
 		 phase, value, value & 7, (value >> 3) & 7, (value >> 6) & 7,
 		 (value >> 9) & 7, (value >> 12) & 7, (value >> 15) & 7,
 		 (value >> 18) & 7, (value >> 21) & 7, (value >> 24) & 7,
@@ -1317,7 +1319,7 @@ static int unlock_transaction_boot(struct unlock_transaction_work *work)
 	if (ad103_readout(work, "after-payload", false))
 		state_ret = -ENODEV;
 	dev_info(&work->pdev->dev,
-		 "AD103 payload result: boot=%d halt=%d marker=%#x expected=%#x marker_ok=%u required_permissions=%u cpuctl=%#x halted=%u ss0=%#x ss1=%#x\n",
+		 "AD10x payload result: boot=%d halt=%d marker=%#x expected=%#x marker_ok=%u required_permissions=%u cpuctl=%#x halted=%u ss0=%#x ss1=%#x\n",
 		 ret, halt_ret, marker, GU_AD103_MARKER, marker == GU_AD103_MARKER,
 		 required, cpuctl, !!(cpuctl & 0x10), ss0, ss1);
 	if (ret || halt_ret || state_ret ||

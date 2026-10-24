@@ -783,7 +783,7 @@ int main(int argc, char **argv) {
                 assert(regs[GU_FEAT_PLM_OFFSET/4]==~0u);
                 assert(regs[0x1fa7cc/4]==0xfffff0ff && regs[0x1fa7c4/4]==~0u);
                 assert(!regs[0x9a0148/4]); /* FBPA untouched: tolerated */
-                assert(strstr(fake.log,"AD103 payload result"));
+                assert(strstr(fake.log,"AD10x payload result"));
                 assert(strstr(fake.log,"marker_ok=1"));
                 assert(strstr(fake.log,"required_permissions=1"));
             } else {
@@ -796,7 +796,7 @@ int main(int argc, char **argv) {
                 pci_dev_put(last_work->pdev);free(last_work);
             }
             assert(!fake.live && !fake.fw_live && dev.refs==1);
-            printf("full AD103 transaction mode %d: error=%d PASS\n",mode,ret);
+            printf("full AD10x transaction mode %d: error=%d PASS\n",mode,ret);
         }
     }
     puts("actual unlock_transaction radix, early-PLM and reset/retention checks passed");

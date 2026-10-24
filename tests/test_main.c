@@ -18,6 +18,7 @@
 #define RTX_3070 0x2484
 #define RTX_A2000 0x2531 /* GA106 professional: not supported */
 #define RTX_4080_SUPER 0x2702 /* AD103 */
+#define RTX_4060_TI 0x2803 /* AD106; same asset path as AD103 */
 
 static struct pci_dev devices[MAX_DEVICES];
 static unsigned int device_count;

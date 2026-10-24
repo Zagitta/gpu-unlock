@@ -38,6 +38,8 @@ static const unsigned short supported_ids[] = {
 	0x2544,
 	/* AD103 (validated only on RTX 4080 SUPER 0x2702) */
 	0x2702,
+	/* AD106 (validated only on RTX 4060 Ti 8GB 0x2803) */
+	0x2803,
 };
 
 /* A target card. Those unlocked at boot stay listed, with a reference, to be
