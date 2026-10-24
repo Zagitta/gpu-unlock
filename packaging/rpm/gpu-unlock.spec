@@ -131,7 +131,7 @@ if [ "$1" -eq 0 ]; then
 fi
 
 %changelog
-* Fri Oct 23 2026 Lance Woodson <lance@workstation> - 1.1.0-1
+* Fri Oct 23 2026 woodsonl <65194841+woodsonl@users.noreply.github.com> - 1.1.0-1
 - Add RTX 4080 SUPER (AD103, 10de:2702) support with the AD10x four-PLM
   payload chain from TOTORONG/AD103_win_unlocker
 
