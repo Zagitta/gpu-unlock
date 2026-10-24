@@ -90,7 +90,7 @@ Since we can write arbitrary values to the stack we can now control this return 
 These pieces of existing code are referred to as "gadgets" and is finding them is referred to as "mining".  
 Now you might wonder how did anyone ever figure out that the booter firmware happens to have a buffer overflow when the firmware is completely inaccessible?  
 As it turns out Nvidia fucked up more than once and for a while published both debug and production booter firmware blobs which in of itself isn't a problem as they're all encrypted.  
-But as it turns out some very clever people found out that Nvidia encrypted the debug image with a known public test-key scheme (key index 37). So with the decrypted firmware it could now be dissassembled and mined for gadgets.  
+But as it turns out some very clever people found out that Nvidia encrypted the debug image with a known public test-key scheme (key index 37). So with the decrypted firmware it could now be disassembled and mined for gadgets.  
 The debug image isn't *exactly* the same as the production one but it's remarkably similar.
 
 Armed with these tools it was just a matter of time before researchers would figure out how to exploit the access gained with code execution in "heavy secure" mode.
