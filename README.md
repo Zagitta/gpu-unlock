@@ -1,12 +1,18 @@
-# GPU unlock 1.0.0
+# GPU unlock 1.1.0
 
-Unlock FP/BF16 instruction issue rate on Nvidia 3000's cards to their professional equivalents
+Unlock FP/BF16 instruction issue rate on Nvidia 3000's and 4000's cards to their professional equivalents
 
 This Linux kernel module combines the CMP unlocker's V67/PLM technique with the pre-driver timing of the UEFI approach. It runs the unlock, writes the speed selectors (SS0 `0x88888888`, which selects the full BF16 rate, and the 4-bit SS1 `0x8` IMLA4) and performs FLR before the unmodified NVIDIA driver binds the card. It is neither a UEFI application nor a patched NVIDIA driver. 
 
 The benefit of this early kmod driver is that it does not require manual patching each time nvidia releases a new driver version.
 
-The effect of this unlock is that it doubles the instruction issuing speed of FP/BF16 FMA into FP32 operations on GA102, GA103, GA104 and GA106 cards.
+The effect of this unlock is that it doubles the instruction issuing speed of FP/BF16 FMA into FP32 operations on GA102, GA103, GA104, GA106 and AD103 cards.
+
+AD103 (RTX 4080 SUPER) uses the AD10x payload chain published by
+[TOTORONG/AD103_win_unlocker](https://huggingface.co/TOTORONG/AD103_win_unlocker),
+which performs the four PLM writes in one Booter launch; the GA102 Booter
+halts on Ada without opening FEAT permissions. Boot log and before/after
+benchmarks for a 4080 SUPER are in `docs/evidence/rtx4080super/`.
 
 [3090 Ti dense 8192³ GEMM at 450 W, five-sample medians with FP32 accumulation](https://github.com/Zagitta/gpu-unlock/issues/1#issue-5905622687):
 
@@ -102,14 +108,14 @@ There is no `softdep nvidia pre:` rule: kmod honours only the first
 The module does nothing unless the kernel command line opts in:
 
 ```
-gpu_unlock.targets=all                          # every unbound GA102/GA103/GA104/GA106 card
+gpu_unlock.targets=all                          # every unbound GA102/GA103/GA104/GA106/AD103 card
 gpu_unlock.targets=0000:21:00.0                 # only these cards
 gpu_unlock.targets=0000:21:00.0,0000:22:00.0    # comma-separated
 ```
 
 Addresses are full PCI names as `lspci -D` prints them (hex digits in either
 case), independent of GPU numbering and display role. An entry that is not
-a GA102/GA103/GA104/GA106 card, including `all` mixed with addresses, is logged and ignored.
+a GA102/GA103/GA104/GA106/AD103 card, including `all` mixed with addresses, is logged and ignored.
 The cards are unlocked concurrently, about a second in all however many
 there are, and each on its own: a card that is already bound or powered
 down is skipped. Bus mastering that the board firmware left on (Supermicro
