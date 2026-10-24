@@ -1,3 +1,4 @@
 usr/src
 usr/share/initramfs-tools
 usr/share/doc/gpu-unlock
+debian/dracut/gpu-unlock.conf usr/lib/dracut/dracut.conf.d

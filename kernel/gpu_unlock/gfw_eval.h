@@ -22,6 +22,9 @@ typedef uint32_t u32;
 #define GU_GFW_TIMEOUT_US 2050000u
 #define GU_FEAT_PLM_OFFSET 0x00823804u
 #define GU_FEAT_SS0_OFFSET 0x0082381cu
+/* FEATURE_READOUT_1: nine 3-bit effective speed fields; zero once every
+ * override is in effect. */
+#define GU_FEAT_READOUT_1_OFFSET 0x00823818u
 #define GU_FEAT_SS1_OFFSET 0x00823820u
 #define GU_GFW_PLM_LEVEL0 0x1u
 #define GU_GFW_BOOT_COMPLETED 0xffu

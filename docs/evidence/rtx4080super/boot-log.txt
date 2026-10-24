@@ -1,0 +1,4 @@
+Oct 23 20:36:14 workstation kernel: Command line: BOOT_IMAGE=/vmlinuz-7.0.0-38-generic root=/dev/mapper/ubuntu--vg-ubuntu--lv ro intel_iommu=off consoleblank=300 pcie_aspm.policy=performance pcie_port_pm=off gpu_unlock.targets=0000:01:00.0 crashkernel=2G-4G:320M,4G-32G:512M,32G-64G:1024M,64G-128G:2048M,128G-:4096M
+Oct 23 20:36:14 workstation kernel: Kernel command line: BOOT_IMAGE=/vmlinuz-7.0.0-38-generic root=/dev/mapper/ubuntu--vg-ubuntu--lv ro intel_iommu=off consoleblank=300 pcie_aspm.policy=performance pcie_port_pm=off gpu_unlock.targets=0000:01:00.0 crashkernel=2G-4G:320M,4G-32G:512M,32G-64G:1024M,64G-128G:2048M,128G-:4096M
+Oct 23 20:36:15 workstation kernel: pci 0000:01:00.0: gpu_unlock: unlocked
+Oct 23 20:36:15 workstation kernel: pci 0000:01:00.0: gpu_unlock: unlocked

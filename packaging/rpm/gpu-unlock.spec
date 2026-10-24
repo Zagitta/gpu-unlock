@@ -1,7 +1,7 @@
 %global nv 610.43.03
 
 Name: gpu-unlock
-Version: 1.0.0
+Version: 1.1.0
 Release: 1%{?dist}
 Summary: RTX 3090 BF16 unlock before the NVIDIA driver loads
 License: GPL-2.0-only
@@ -131,5 +131,9 @@ if [ "$1" -eq 0 ]; then
 fi
 
 %changelog
+* Fri Oct 23 2026 Lance Woodson <lance@workstation> - 1.1.0-1
+- Add RTX 4080 SUPER (AD103, 10de:2702) support with the AD10x four-PLM
+  payload chain from TOTORONG/AD103_win_unlocker
+
 * Mon Sep 28 2026 Zagitta <zetlon+github@gmail.com> - 1.0.0-1
 - Initial release.

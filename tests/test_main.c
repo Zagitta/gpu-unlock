@@ -17,6 +17,7 @@
 #define RTX_3090 0x2204
 #define RTX_3070 0x2484
 #define RTX_A2000 0x2531 /* GA106 professional: not supported */
+#define RTX_4080_SUPER 0x2702 /* AD103 */
 
 static struct pci_dev devices[MAX_DEVICES];
 static unsigned int device_count;
@@ -277,14 +278,16 @@ int main(void)
 	add("0000:31:00.0", RTX_A2000, false);
 	add("0000:41:00.0", RTX_3090, true);
 	add("0000:61:00.0", 0x2208, false);
-	fake.expected_concurrent = 3;
+	add("0000:71:00.0", RTX_4080_SUPER, false);
+	fake.expected_concurrent = 4;
 	run();
-	assert(fake.max_in_flight == 3 && fake.started == 3);
-	assert(fake.unlocks[0] && fake.unlocks[1] && !fake.unlocks[2] && !fake.unlocks[3] && fake.unlocks[4]);
+	assert(fake.max_in_flight == 4 && fake.started == 4);
+	assert(fake.unlocks[0] && fake.unlocks[1] && !fake.unlocks[2] && !fake.unlocks[3] && fake.unlocks[4] && fake.unlocks[5]);
 	assert(fake.loads == 1 && fake.load_dev == &devices[0] && fake.releases == 1);
 	assert(logged("0000:01:00.0: gpu_unlock: unlocked") && logged("0000:61:00.0: gpu_unlock: unlocked"));
+	assert(logged("0000:71:00.0: gpu_unlock: unlocked"));
 	assert(logged("0000:41:00.0: gpu_unlock: unlock failed (-16)"));
-	puts("all: three cards unlocked concurrently, bound card skipped PASS");
+	puts("all: four cards unlocked concurrently, bound card skipped PASS");
 
 	/* A list picks cards in any case; the rest are not touched. */
 	reset("0000:61:00.0,0000:0A:00.0");

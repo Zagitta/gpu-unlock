@@ -25,6 +25,7 @@ static struct {
     int reset_locked_until_flr,hold_writes,bar_ready_after,bar_ready_reads,wpr_after;
     int post_gfw,post_gfw_reads,gsp_post_reset_writes;
     int fwsec_wpr;u32 fwsec_wpr_lo,fwsec_wpr_hi; /* WPR2 that FWSEC-FRTS enables */
+    int ad103,ad_marker_bad,ad_drop_wpr; /* AD10x baked-chain simulation */
     int apertures,regions;
     int bound,gfw_late,gfw_late_reads; /* resume: nvidia bound; GFW done after N reads */
     int busmaster; /* the PCI core's is_busmaster */
@@ -118,6 +119,15 @@ void writel(u32 v,void *p) {
         if(fake.boot_mode==0)regs[GU_FEAT_PLM_OFFSET/4]=~0u;
         if(fake.boot_mode==2)regs[(SEC2_BASE+0x100)/4]=~0u;
         if(fake.boot_mode==3)regs[(SEC2_BASE+0x100)/4]=0x10;
+        if(fake.ad103) {
+            /* The baked AD10x chain applies its whole write set in one
+             * launch; FBPA never takes the write on observed Ada parts. */
+            regs[0x1fa7cc/4]=0xfffff0ff;
+            if(!fake.ad_drop_wpr)regs[0x1fa7c4/4]=~0u;
+            regs[GU_FEAT_PLM_OFFSET/4]=~0u;
+            regs[(SEC2_BASE+0x40)/4]=fake.ad_marker_bad?0x91:0x67b00001u;
+            regs[(SEC2_BASE+0x100)/4]=0x10;
+        }
     }
     if(fake.fail_reset==2 && (off==SEC2_BASE+0x3c0 || off==0x1103c0))regs[off/4]=0;
     if(fake.fail_reset==8 && (off==SEC2_BASE+0x3c0 || off==0x1103c0))regs[off/4]=0xbadf0001;
@@ -714,6 +724,53 @@ int main(int argc, char **argv) {
             printf("full transaction %s: error=%d retained=%u PASS\n",cases[scenario],ret,retained);
         }
         puts("pinned firmware full BF16 transactions passed under mocked hardware");
+        /* Full AD103 (RTX 4080 SUPER) transactions: the baked chain applies
+         * its whole write set in a single Booter launch. */
+        for(int mode=0;mode<3;mode++) {
+            setup(&w);
+            load_rom(argv[1]);
+            dev.device=0x2702;regs[0]=0x193000a1;
+            regs[0x1183a4/4]=0x6000;regs[0x625f04/4]=1;regs[0x1fa7c8/4]=0x45cb8f;
+            regs[0x1fa82c/4]=0x100000;regs[0x1fa830/4]=0x5cffff0;
+            regs[GU_GFW_PLM_OFFSET/4]=1;regs[GU_GFW_BOOT_OFFSET/4]=0xff;
+            regs[GU_GFW_CPUCTL_OFFSET/4]=0x10;
+            regs[GU_FEAT_PLM_OFFSET/4]=0xffffff8f; /* consumer cold gate */
+            regs[GU_FEAT_SS0_OFFSET/4]=0x44023025;regs[GU_FEAT_SS1_OFFSET/4]=0x7;
+            fake.fwsec_wpr=1;
+            fake.fwsec_wpr_lo=(u32)(0x5ffe00000ull>>12)<<4;
+            fake.fwsec_wpr_hi=(u32)(0x5ffeff000ull>>12)<<4;
+            regs[(GU_FUSE_SEC2_UCODE1+2*4)/4]=1;
+            if(strcmp(argv[1],"-"))regs[(0x8241c0+8*4)/4]=1;
+            fake.ad103=1;
+            if(mode==1)fake.ad_marker_bad=1;
+            if(mode==2)fake.ad_drop_wpr=1;
+            struct gpu_unlock_610_shared shared={0};last_work=NULL;
+            int ret=gpu_unlock_610_load_shared(&dev,&shared);
+            assert(fake.fw_requests==1);
+            if(!ret)ret=gpu_unlock_610_unlock(&dev,&shared,false);
+            gpu_unlock_610_release_shared(&shared);
+            if(!mode) {
+                assert(!ret && fake.gsp_starts==1 && fake.starts==1 && fake.flrs==1 && !fake.pins);
+                assert(fake.selector_writes==1 && fake.ss1_writes==1 && fake.apertures==1);
+                assert(regs[GU_FEAT_SS0_OFFSET/4]==0x88888888 && regs[GU_FEAT_SS1_OFFSET/4]==0x8);
+                assert(regs[GU_FEAT_PLM_OFFSET/4]==~0u);
+                assert(regs[0x1fa7cc/4]==0xfffff0ff && regs[0x1fa7c4/4]==~0u);
+                assert(!regs[0x9a0148/4]); /* FBPA untouched: tolerated */
+                assert(strstr(fake.log,"AD103 payload result"));
+                assert(strstr(fake.log,"marker_ok=1"));
+                assert(strstr(fake.log,"required_permissions=1"));
+            } else {
+                assert(ret);
+                if(mode==1)assert(strstr(fake.log,"marker_ok=0"));
+                if(mode==2)assert(!strstr(fake.log,"required_permissions=1"));
+                assert(last_work && fake.live>0);
+                last_work->firmware_started=false;
+                assert(!unlock_transaction_unwind(last_work));
+                pci_dev_put(last_work->pdev);free(last_work);
+            }
+            assert(!fake.live && !fake.fw_live && dev.refs==1);
+            printf("full AD103 transaction mode %d: error=%d PASS\n",mode,ret);
+        }
     }
     puts("actual unlock_transaction radix, early-PLM and reset/retention checks passed");
 }
