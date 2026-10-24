@@ -28,3 +28,14 @@ follow those source contracts; `licenses/NVIDIA-MIT.txt` preserves the notice.
 The inspected EFI reference's notice is in `licenses/CMP40HX-MIT.txt`.
 The reference changes a CMP 90HX, not an RTX 3090, and is not evidence of
 standalone boot or persistence through NVIDIA 615.71.09.
+
+The AD10x payload (four PLM writes plus the SEC2 mailbox marker in one
+launch) is derived from TOTORONG/AD103_win_unlocker
+(https://huggingface.co/TOTORONG/AD103_win_unlocker), file
+`source/firmware-tools/ad102_payload.py` at revision
+`51df9c17ec89eb8486df52cc9079dde4bd1f9974`, license GPL-2.0-only. The
+generated image matches that project's published
+`v67-ad102-610.43.03-four-plm.bin` byte-for-byte (SHA-256 pinned in
+`artifacts-610.43.03.json`). The AD102 Booter and GSP boot assets are
+decoded unchanged from the pinned 610.43.03 source archive; per that
+source, AD102/AD103/AD104/AD106/AD107 all boot the AD102 Booter archive.
