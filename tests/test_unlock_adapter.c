@@ -554,7 +554,7 @@ int main(int argc, char **argv) {
             "warm-wpr2","ss1-readback","ss1-lost","power-unknown","power-unknown-no-pm",
             "firmware-bme","firmware-bme-stuck",
             "resume-success","resume-gfw-late","resume-kept-power","resume-gsp-running",
-            "resume-gfw-timeout","resume-oom"};
+            "resume-gfw-timeout","resume-oom","cold-gfw-late"};
         int total_allocations=0;
         for(unsigned scenario=0;scenario<ARRAY_SIZE(cases);scenario++) {
             setup(&w);
@@ -635,6 +635,11 @@ int main(int argc, char **argv) {
             }
             if(!strcmp(cases[scenario],"resume-gfw-timeout"))regs[GU_GFW_BOOT_OFFSET/4]=0;
             if(!strcmp(cases[scenario],"resume-oom"))fake.fail_alloc=1;
+            /* A Thunderbolt eGPU probed ~0.3 s after power-on: GFW still runs and
+             * the FB size reads back the PRI error captured on such a boot. */
+            if(!strcmp(cases[scenario],"cold-gfw-late")) {
+                fake.gfw_late=5;regs[GU_GFW_BOOT_OFFSET/4]=0;regs[0x1183a4/4]=0xbadf5108;
+            }
             /* As main.c: the GSP file is loaded once, ahead of every card. */
             struct gpu_unlock_610_shared shared={0};last_work=NULL;
             int ret=gpu_unlock_610_load_shared(&dev,&shared);
@@ -642,7 +647,8 @@ int main(int argc, char **argv) {
             gpu_unlock_610_release_shared(&shared);
             bool expected=scenario<2 || (scenario>=33 && scenario<=35) || scenario==39 || scenario==40 || scenario==43 || scenario==46 ||
                 scenario==58 || scenario==60 ||
-                !strcmp(cases[scenario],"resume-success") || !strcmp(cases[scenario],"resume-gfw-late");
+                !strcmp(cases[scenario],"resume-success") || !strcmp(cases[scenario],"resume-gfw-late") ||
+                !strcmp(cases[scenario],"cold-gfw-late");
             bool retained=fake.pins;
             if((!ret)!=expected)fprintf(stderr,"%s\n%s: error=%d\n",fake.log,cases[scenario],ret);
             assert((!ret)==expected);
@@ -687,6 +693,8 @@ int main(int argc, char **argv) {
             assert(dev.dev.devres_head.count==(scenario==53 || scenario==54 || bound?1u:0u));
             assert(dev.dev.dma_mask==&mask && mask==0xffffffffffffull && dev.dev.coherent_dma_mask==0xfffffffffull);
             if(!strcmp(cases[scenario],"resume-gfw-late"))assert(fake.gfw_late_reads>=fake.gfw_late);
+            if(!strcmp(cases[scenario],"cold-gfw-late"))
+                assert(fake.gfw_late_reads>=fake.gfw_late && strstr(fake.log,"GFW boot was still running"));
             /* A card that kept power or runs GSP-RM is only read. */
             if(!strcmp(cases[scenario],"resume-kept-power") || !strcmp(cases[scenario],"resume-gsp-running")) {
                 assert(ret==(cases[scenario][7]=='k'?-EALREADY:-EBUSY));
