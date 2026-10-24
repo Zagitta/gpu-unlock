@@ -180,7 +180,7 @@ The [inferred from observed behavior model of the PLM bitfields](https://github.
 - Bits `[7:4] = WRITE_PROTECTION`: one bit per level. A set bit = that level may write.
 - Bits `[23:8] = SOURCE_ENABLE`: controls which on-die sources may issue accesses.
 
-Our two registers happens to be governed by the same `FEAT_OVR_PLM` register at `0x00823804` which contains `0xffffff8f` by default on all GA100 and GA102 cards.
+Our two registers happen to be governed by the same `FEAT_OVR_PLM` register at `0x00823804` which contains `0xffffff8f` by default on all GA100 and GA102 cards.
 
 Reading `0x8f` in the low byte = `1000 1111`:
 
