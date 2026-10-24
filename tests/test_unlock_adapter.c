@@ -5,7 +5,7 @@
 #define __KERNEL__
 #include "../kernel/gpu_unlock/unlock_610.c"
 #include "vbios_fixture.h"
-static u32 regs[0x900000/4];
+static u32 regs[0xa00000/4]; /* covers the FBPA PLM at 0x9a0148 */
 static const char *asset_root;
 static struct unlock_transaction_work *last_work;
 static bool full_active;
@@ -178,8 +178,11 @@ int request_firmware(const struct firmware **f,const char *n,struct device *d) {
 void release_firmware(const struct firmware *f) {if(f){free((void *)f->data);free((void *)f);fake.fw_live--;}}
 void __module_get(void *p) {fake.pins++;}
 int pci_read_config_word(struct pci_dev *p,int r,u16 *v) {*v=r==PCI_COMMAND?fake.cmd:r==PCI_VENDOR_ID?0x10de:0;return 0;}
+static u32 test_pci_identity(const struct pci_dev *p) {
+    return (u32)p->device<<16 | p->vendor;
+}
 int pci_read_config_dword(struct pci_dev *p,int r,u32 *v) {
-    *v=r==PCI_VENDOR_ID?(fake.flrs && fake.lost_identity?~0u:0x220410de):(u32)fake.bar_bad;return 0;
+    *v=r==PCI_VENDOR_ID?(fake.flrs && fake.lost_identity?~0u:test_pci_identity(p)):(u32)fake.bar_bad;return 0;
 }
 int pci_write_config_word(struct pci_dev *p,int r,u16 v) {assert(r==PCI_COMMAND);fake.cmd=v|(fake.master_stuck?4:0);return 0;}
 int pcie_capability_read_word(struct pci_dev *p,int r,u16 *v) {*v=r==PCI_EXP_DEVSTA?fake.pending:0;return 0;}
@@ -248,9 +251,21 @@ static void check_published_image(void) {
     assert(get64(meta)==GU_WPR_META_MAGIC && get64(meta+8)==1);
     assert(get64(meta+72)==w->v67_dma && get64(meta+80)==GU_V67_SIZE);
     assert(!memcmp(w->v67_cpu,w->v67_fw->data,GU_V67_SIZE));
-    assert(get64(meta+112)==0x5f5400000ull && get64(meta+136)==0x5fada0000ull);
-    assert(get64(meta+144)==0x5ffdfa000ull && get64(meta+152)==0x5ffe00000ull);
-    assert(get64(meta+168)==0x5fff00000ull && get64(meta+176)==0x600000000ull);
+    if(w->pdev->device==0x2702) {
+        /* The larger AD10x boot image shifts every reservation down. */
+        struct gpu_unlock_layout_in lin=(struct gpu_unlock_layout_in){.usable_fb=24ull<<30,
+            .vga_base=(24ull<<30)-(1ull<<20),.frts_size=1ull<<20,
+            .image_size=84226048,.boot_size=36864,.nonwpr_size=1ull<<20,.heap_request=88ull<<20};
+        struct gpu_unlock_layout_out lout;
+        assert(!gpu_unlock_layout(&lin,&lout));
+        assert(get64(meta+112)==lout.wpr_start && get64(meta+136)==lout.gsp_offset);
+        assert(get64(meta+144)==lout.boot_offset && get64(meta+152)==lout.frts_offset);
+        assert(get64(meta+168)==lout.wpr_end && get64(meta+176)==24ull<<30);
+    } else {
+        assert(get64(meta+112)==0x5f5400000ull && get64(meta+136)==0x5fada0000ull);
+        assert(get64(meta+144)==0x5ffdfa000ull && get64(meta+152)==0x5ffe00000ull);
+        assert(get64(meta+168)==0x5fff00000ull && get64(meta+176)==0x600000000ull);
+    }
     /* Independently walk the radix the way a firmware consumer does. Compare
      * every published image byte, including transitions across 512-entry tables. */
     u64 image_bytes=get64(meta+24);assert(image_bytes==84226048);
@@ -265,7 +280,10 @@ static void check_published_image(void) {
     }
     assert(!memcmp(w->boot_cpu,w->boot_fw->data,w->boot_desc.image_size));
     /* SEC2 fuse v1 selects slot 0 of the two-signature Booter asset. */
-    assert(!memcmp((u8 *)w->booter_cpu+35344,w->booter_fw->data+72+60416,384));
+    if(w->pdev->device==0x2702)
+        assert(!memcmp((u8 *)w->booter_cpu+32272,w->booter_fw->data+72+56832,384));
+    else
+        assert(!memcmp((u8 *)w->booter_cpu+35344,w->booter_fw->data+72+60416,384));
 }
 static void check_restored_signature(void) {
     struct unlock_transaction_work *w=last_work;const u8 *meta=w->meta_cpu;
@@ -354,10 +372,17 @@ int main(int argc, char **argv) {
         setup(&w);
         u32 dest=bad==0?0xffff00:0, off=bad==1?0xffffff00:0;
         dma_addr_t src=bad==2?(1ull<<49)-256:0x100000;
-        u32 size=bad==3?257:512;
+        u32 size=bad==3?0:512;
         if(bad==4)src++;
         assert(falcon_dma(&w,SEC2_BASE,dest,off,src,size,0x614)==-EINVAL);
         assert(!fake.writes);
+    }
+    /* s_dmaTransfer_GA102 moves ceil(size/256) blocks: a non-multiple length
+     * like AD103's 0xd80 FWSEC DMEM is legal and programs one extra block. */
+    {
+        setup(&w);
+        assert(!falcon_dma(&w,SEC2_BASE,0,0,0x100000,3456,0x614));
+        assert(fake.dma_commands==14);
     }
     {
         const struct falcon_eng eng={SEC2_BASE,SEC2_FBIF,SEC2_FALCON2};
@@ -366,7 +391,7 @@ int main(int argc, char **argv) {
                          0x100000,0,0,false)==-ERANGE);
         assert(!fake.writes);
         /* Bad DMEM geometry must not leave an already-submitted IMEM DMA. */
-        assert(falcon_hs(&w,&eng,0,256,0,0,256,257,0,0,1,3,
+        assert(falcon_hs(&w,&eng,0,256,0,0x1000000,256,256,0,0,1,3,
                          0x100000,0,0,false)==-EINVAL);
         assert(!fake.writes);
     }
@@ -750,6 +775,8 @@ int main(int argc, char **argv) {
             if(!ret)ret=gpu_unlock_610_unlock(&dev,&shared,false);
             gpu_unlock_610_release_shared(&shared);
             if(!mode) {
+                if(!(ret==0 && fake.gsp_starts==1 && fake.starts==1 && fake.flrs==1 && !fake.pins))
+                    fprintf(stderr,"ADDBG ret=%d gsp=%d starts=%d flrs=%d pins=%d log=[%.2500s]\n",ret,fake.gsp_starts,fake.starts,fake.flrs,fake.pins,fake.log);
                 assert(!ret && fake.gsp_starts==1 && fake.starts==1 && fake.flrs==1 && !fake.pins);
                 assert(fake.selector_writes==1 && fake.ss1_writes==1 && fake.apertures==1);
                 assert(regs[GU_FEAT_SS0_OFFSET/4]==0x88888888 && regs[GU_FEAT_SS1_OFFSET/4]==0x8);
