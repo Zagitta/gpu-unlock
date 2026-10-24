@@ -2,6 +2,7 @@
 """Check the generated payload and the shared install layout."""
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -42,11 +43,26 @@ class PackageTests(unittest.TestCase):
             # initramfs instead: gpu_unlock goes right before nvidia.
             self.assertFalse(any("modprobe.d" in path for path in paths))
             dropin = root / "etc/mkinitcpio.conf.d/zz-gpu-unlock.conf"
-            for before, after in (("zfs nvidia nvidia_drm", "zfs gpu_unlock? nvidia nvidia_drm"),
-                                  ("zfs", "zfs gpu_unlock?")):
-                result = subprocess.run(["bash", "-c", f"MODULES=({before}); . {dropin}; echo ${{MODULES[*]}}"],
-                                        capture_output=True, text=True, check=True)
-                self.assertEqual(result.stdout.strip(), after)
+            # The drop-in resolves gpu_unlock with modinfo for the kernel being
+            # imaged: a resolved module goes in as a plain name (kmod cannot
+            # resolve the '?' suffix in modules-load.d), an unresolved one is
+            # left out. Mock modinfo so both paths are deterministic here.
+            with tempfile.TemporaryDirectory() as bindir:
+                mock = Path(bindir) / "modinfo"
+                env = {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}",
+                       "KERNELVERSION": "9.9.9-mock"}
+                for available, cases in (
+                        ("0", (("zfs nvidia nvidia_drm", "zfs gpu_unlock nvidia nvidia_drm"),
+                               ("zfs", "zfs gpu_unlock"))),
+                        ("1", (("zfs nvidia nvidia_drm", "zfs nvidia nvidia_drm"),
+                               ("zfs", "zfs")))):
+                    mock.write_text(f"#!/bin/sh\nexit {available}\n")
+                    mock.chmod(0o755)
+                    for before, after in cases:
+                        result = subprocess.run(
+                            ["bash", "-c", f"MODULES=({before}); . {dropin}; echo ${{MODULES[*]}}"],
+                            env=env, capture_output=True, text=True, check=True)
+                        self.assertEqual(result.stdout.strip(), after)
 
     def test_pkgbuild_pins_match_manifest(self):
         manifest = json.loads((ROOT / "firmware/artifacts-610.43.03.json").read_text())
