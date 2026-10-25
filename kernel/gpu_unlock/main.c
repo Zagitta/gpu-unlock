@@ -12,15 +12,20 @@
 
 static char *targets;
 module_param(targets, charp, 0444);
-MODULE_PARM_DESC(targets, "\"all\" or comma-separated PCI addresses of GA102/GA103/GA104/GA106 cards to unlock");
+MODULE_PARM_DESC(targets, "\"all\" or comma-separated PCI addresses of supported cards; experimental AD107 requires one full PCI address");
 
 static bool resume = true;
 module_param(resume, bool, 0644);
-MODULE_PARM_DESC(resume, "Unlock the cards again after resume from suspend, which powers them off (default: on)");
+MODULE_PARM_DESC(resume, "Re-unlock resume-validated cards after suspend (default: on; experimental AD107 is startup-only)");
+
+static bool ad107_experimental;
+module_param(ad107_experimental, bool, 0444);
+MODULE_PARM_DESC(ad107_experimental, "Enable startup-only AD107M 10de:28a0 subsystem 1d05:1274 revision a1 with one explicit full PCI target (default: off)");
 
 /* GA102, GA103, GA104 and GA106 GPU functions in pci.ids, excluding audio
  * functions and the professional (GL) parts, which already run BF16 at full
- * rate. GA103 and GA106 also exclude mobile parts.
+ * rate. GA103 and GA106 also exclude mobile parts. AD107M is restricted to
+ * the experimental board and explicit single-target opt-in below.
  */
 static const unsigned short supported_ids[] = {
 	/* GA102 */
@@ -36,10 +41,16 @@ static const unsigned short supported_ids[] = {
 	/* GA106 (validated only on RTX 3060 12GB 0x2504) */
 	0x2501, 0x2503, 0x2504, 0x2505, 0x2507, 0x2508, 0x2509, 0x252f,
 	0x2544,
+	/* AD103 (validated only on RTX 4080 SUPER 0x2702) */
+	0x2702,
+	/* AD106 (validated only on RTX 4060 Ti 8GB 0x2803) */
+	0x2803,
+	/* AD107M RTX 4060 Laptop: experimental 1d05:1274 revision a1 only */
+	0x28a0,
 };
 
-/* A target card. Those unlocked at boot stay listed, with a reference, to be
- * unlocked again after each resume. */
+/* A target card. Only resume-validated cards unlocked at startup stay listed,
+ * with a reference, to be unlocked again after each resume. */
 struct card {
 	struct list_head node;
 	struct pci_dev *pdev;
@@ -50,16 +61,29 @@ static LIST_HEAD(cards);
 static ASYNC_DOMAIN_EXCLUSIVE(unlock_domain);
 static struct gpu_unlock_610_shared shared;
 
+static bool ad107_selected(const struct pci_dev *pdev)
+{
+	/* Matching pci_name requires the full domain:bus:device.function address;
+	 * neither "all" nor any comma list can authorize this experiment. */
+	return ad107_experimental && targets && !strchr(targets, ',') &&
+		!strcasecmp(targets, pci_name(pdev)) &&
+		pdev->subsystem_vendor == 0x1d05 && pdev->subsystem_device == 0x1274 &&
+		pdev->revision == 0xa1;
+}
+
 /* The next supported NVIDIA card after from, like pci_get_device(). */
 static struct pci_dev *next_supported(struct pci_dev *from)
 {
 	struct pci_dev *pdev = from;
 	unsigned int i;
 
-	while ((pdev = pci_get_device(PCI_VENDOR_ID_NVIDIA, PCI_ANY_ID, pdev)))
+	while ((pdev = pci_get_device(PCI_VENDOR_ID_NVIDIA, PCI_ANY_ID, pdev))) {
+		if (pdev->device == 0x28a0 && !ad107_selected(pdev))
+			continue;
 		for (i = 0; i < ARRAY_SIZE(supported_ids); i++)
 			if (pdev->device == supported_ids[i])
 				return pdev;
+	}
 	return NULL;
 }
 
@@ -203,8 +227,10 @@ static int __init gpu_unlock_init(void)
 	}
 	/* nvidia loads once this returns: every card must be finished by then. */
 	unlock_cards(unlock_one);
+	/* AD107 has startup-only validation. Do not retain it for PM resume or
+	 * register a notifier when no resume-validated card remains. */
 	list_for_each_entry_safe(card, next, &cards, node)
-		if (!card->unlocked)
+		if (!card->unlocked || card->pdev->device == 0x28a0)
 			drop_card(card);
 	if (!list_empty(&cards))
 		register_pm_notifier(&pm_nb);
@@ -224,5 +250,5 @@ static void __exit gpu_unlock_exit(void)
 module_init(gpu_unlock_init);
 module_exit(gpu_unlock_exit);
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("Ampere pre-driver BF16 unlock");
-MODULE_VERSION("1.0.0");
+MODULE_DESCRIPTION("Ampere/Ada pre-driver Tensor rate unlock");
+MODULE_VERSION("1.1.0");

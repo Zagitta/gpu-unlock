@@ -17,6 +17,9 @@
 #define RTX_3090 0x2204
 #define RTX_3070 0x2484
 #define RTX_A2000 0x2531 /* GA106 professional: not supported */
+#define RTX_4080_SUPER 0x2702 /* AD103 */
+#define RTX_4060_TI 0x2803 /* AD106; same asset path as AD103 */
+#define RTX_4060_LAPTOP 0x28a0 /* AD107M: only the explicitly opted-in board */
 
 static struct pci_dev devices[MAX_DEVICES];
 static unsigned int device_count;
@@ -218,7 +221,8 @@ static void add(const char *name, unsigned short device, bool bound)
 	struct pci_dev *pdev = &devices[device_count++];
 
 	*pdev = (struct pci_dev){ .name = name, .vendor = PCI_VENDOR_ID_NVIDIA, .device = device,
-				  .driver = bound ? &nvidia_driver : NULL, .refs = 1 };
+				  .subsystem_vendor = 0x1d05, .subsystem_device = 0x1274,
+				  .revision = 0xa1, .driver = bound ? &nvidia_driver : NULL, .refs = 1 };
 	pthread_mutex_init(&pdev->lock, NULL);
 }
 
@@ -268,8 +272,112 @@ static bool logged(const char *text)
 	return strstr(fake.log, text);
 }
 
-int main(void)
+static void set_ad107_experimental(bool enabled)
 {
+	struct test_bool_parameter *parameter;
+
+	for (parameter = test_bool_parameters; parameter; parameter = parameter->next)
+		if (!strcmp(parameter->name, "ad107_experimental"))
+			*parameter->value = enabled;
+}
+
+static void test_ad107_selection_and_resume(void)
+{
+	/* Merely naming the board must not enable an experimental unlock. */
+	reset("0000:0a:00.0");
+	add("0000:0a:00.0", RTX_4060_LAPTOP, false);
+	run();
+	assert(!fake.unlocks[0] && !fake.loads);
+
+	static const struct {
+		const char *list;
+		int laptop, ampere;
+	} selections[] = {
+		{ "0000:0a:00.0", 1, 0 },
+		{ "0000:0A:00.0", 1, 0 },
+		{ "all", 0, 1 },
+		{ "0000:0a:00.0,0000:21:00.0", 0, 1 },
+		{ "0000:0a:00.0,0000:0a:00.0", 0, 0 },
+		{ "0000:0a:00.0,", 0, 0 },
+		{ ",0000:0a:00.0", 0, 0 },
+		{ "0a:00.0", 0, 0 },
+		{ "0000:0a:00.0 ", 0, 0 },
+		{ "", 0, 0 },
+		{ NULL, 0, 0 },
+	};
+	for (unsigned int i = 0; i < ARRAY_SIZE(selections); i++) {
+		reset((char *)selections[i].list);
+		set_ad107_experimental(true);
+		add("0000:0a:00.0", RTX_4060_LAPTOP, false);
+		add("0000:21:00.0", RTX_3090, false);
+		run();
+		assert(fake.unlocks[0] == selections[i].laptop);
+		assert(fake.unlocks[1] == selections[i].ampere);
+	}
+	puts("AD107: explicit single full target and opt-in required PASS");
+
+	/* A family ID or a different subsystem/revision is not board evidence. */
+	static const struct {
+		unsigned short device, subsystem_vendor, subsystem_device;
+		unsigned char revision;
+	} rejected[] = {
+		{ 0x28a0, 0x1d05, 0x1275, 0xa1 },
+		{ 0x28a0, 0x1d06, 0x1274, 0xa1 },
+		{ 0x28a0, 0x1d05, 0x1274, 0xa0 },
+		{ 0x28a1, 0x1d05, 0x1274, 0xa1 },
+		{ 0x2882, 0x1d05, 0x1274, 0xa1 },
+	};
+	for (unsigned int i = 0; i < ARRAY_SIZE(rejected); i++) {
+		reset("0000:0a:00.0");
+		add("0000:0a:00.0", rejected[i].device, false);
+		devices[0].subsystem_vendor = rejected[i].subsystem_vendor;
+		devices[0].subsystem_device = rejected[i].subsystem_device;
+		devices[0].revision = rejected[i].revision;
+		run();
+		assert(!fake.unlocks[0] && !fake.loads);
+	}
+	reset("0000:0a:00.0");
+	add("0000:0a:00.0", RTX_4060_LAPTOP, true);
+	run();
+	assert(!fake.unlocks[0]);
+	puts("AD107: other boards, sibling IDs and bound cards left alone PASS");
+
+	/* The startup unlock does not authorize a second firmware launch at PM
+	 * resume, even if the successfully unlocked card is now bound to nvidia. */
+	reset("0000:0a:00.0");
+	add("0000:0a:00.0", RTX_4060_LAPTOP, false);
+	boot();
+	assert(fake.unlocks[0] == 1);
+	devices[0].driver = &nvidia_driver;
+	if (fake.nb)
+		notify(PM_POST_SUSPEND);
+	assert(!fake.resumes[0] && fake.started == 1);
+	shutdown();
+
+	/* Existing Ada cards retain normal selection and PM-resume behavior,
+	 * while targets=all must still leave the experimental laptop alone. */
+	reset("all");
+	add("0000:01:00.0", RTX_4080_SUPER, false);
+	add("0000:21:00.0", RTX_4060_TI, false);
+	add("0000:0a:00.0", RTX_4060_LAPTOP, false);
+	fake.expected_concurrent = 2;
+	boot();
+	assert(fake.unlocks[0] == 1 && fake.unlocks[1] == 1 && !fake.unlocks[2]);
+	for (unsigned int i = 0; i < device_count; i++)
+		devices[i].driver = &nvidia_driver;
+	notify(PM_POST_SUSPEND);
+	assert(fake.resumes[0] == 1 && fake.resumes[1] == 1 && !fake.resumes[2]);
+	shutdown();
+	set_ad107_experimental(false);
+	puts("AD107: no resume re-unlock; existing Ada resumes preserved PASS");
+}
+
+int main(int argc, char **argv)
+{
+	if (argc == 2 && !strcmp(argv[1], "--ad107")) {
+		test_ad107_selection_and_resume();
+		return 0;
+	}
 	/* Every unbound supported card at once; other chips and bound cards left alone. */
 	reset("all");
 	add("0000:01:00.0", RTX_3090, false);
@@ -277,14 +385,16 @@ int main(void)
 	add("0000:31:00.0", RTX_A2000, false);
 	add("0000:41:00.0", RTX_3090, true);
 	add("0000:61:00.0", 0x2208, false);
-	fake.expected_concurrent = 3;
+	add("0000:71:00.0", RTX_4080_SUPER, false);
+	fake.expected_concurrent = 4;
 	run();
-	assert(fake.max_in_flight == 3 && fake.started == 3);
-	assert(fake.unlocks[0] && fake.unlocks[1] && !fake.unlocks[2] && !fake.unlocks[3] && fake.unlocks[4]);
+	assert(fake.max_in_flight == 4 && fake.started == 4);
+	assert(fake.unlocks[0] && fake.unlocks[1] && !fake.unlocks[2] && !fake.unlocks[3] && fake.unlocks[4] && fake.unlocks[5]);
 	assert(fake.loads == 1 && fake.load_dev == &devices[0] && fake.releases == 1);
 	assert(logged("0000:01:00.0: gpu_unlock: unlocked") && logged("0000:61:00.0: gpu_unlock: unlocked"));
+	assert(logged("0000:71:00.0: gpu_unlock: unlocked"));
 	assert(logged("0000:41:00.0: gpu_unlock: unlock failed (-16)"));
-	puts("all: three cards unlocked concurrently, bound card skipped PASS");
+	puts("all: four cards unlocked concurrently, bound card skipped PASS");
 
 	/* A list picks cards in any case; the rest are not touched. */
 	reset("0000:61:00.0,0000:0A:00.0");
@@ -418,5 +528,6 @@ int main(void)
 	assert(!fake.registrations && !fake.nb);
 	shutdown();
 	puts("resume: no notifier without an unlocked card PASS");
+	test_ad107_selection_and_resume();
 	return 0;
 }

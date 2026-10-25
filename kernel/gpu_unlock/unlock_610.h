@@ -22,8 +22,10 @@ int gpu_unlock_610_load_shared(struct pci_dev *pdev, struct gpu_unlock_610_share
 void gpu_unlock_610_release_shared(struct gpu_unlock_610_shared *shared);
 
 /*
- * Unlock one cold, unbound RTX 3090, or with resume one that nvidia suspended
- * before a suspend to RAM and resumes after this returns. The caller holds
+ * Unlock one supported cold, unbound card, or with resume one that nvidia
+ * suspended before a suspend to RAM and resumes after this returns.
+ * Experimental AD107 is startup-only: resume returns -EOPNOTSUPP without
+ * acquiring transaction resources. The caller holds
  * pci_dev_lock. Returns 0 when the card is unlocked and handed back as found;
  * otherwise a negative errno, with the card left locked. After resume,
  * -EALREADY means the card kept power and is still unlocked, and nothing was
