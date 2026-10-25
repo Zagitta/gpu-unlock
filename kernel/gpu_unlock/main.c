@@ -12,15 +12,16 @@
 
 static char *targets;
 module_param(targets, charp, 0444);
-MODULE_PARM_DESC(targets, "\"all\" or comma-separated PCI addresses of GA102/GA103/GA104/GA106 cards to unlock");
+MODULE_PARM_DESC(targets, "\"all\" or comma-separated PCI addresses of GA102/GA103/GA104/GA106/GA107 cards to unlock");
 
 static bool resume = true;
 module_param(resume, bool, 0644);
 MODULE_PARM_DESC(resume, "Unlock the cards again after resume from suspend, which powers them off (default: on)");
 
-/* GA102, GA103, GA104 and GA106 GPU functions in pci.ids, excluding audio
- * functions and the professional (GL) parts, which already run BF16 at full
- * rate. GA103 and GA106 also exclude mobile parts.
+/* GA102, GA103, GA104, GA106 and GA107 GPU functions in pci.ids, excluding
+ * audio functions and the professional (GL) parts, which already run BF16 at
+ * full rate. GA103 and GA106 also exclude mobile parts. GA107 lists only the
+ * parts reported so far.
  */
 static const unsigned short supported_ids[] = {
 	/* GA102 */
@@ -36,6 +37,8 @@ static const unsigned short supported_ids[] = {
 	/* GA106 (validated only on RTX 3060 12GB 0x2504) */
 	0x2501, 0x2503, 0x2504, 0x2505, 0x2507, 0x2508, 0x2509, 0x252f,
 	0x2544,
+	/* GA107 (validated on RTX 3050 Ti Laptop 0x25a0) */
+	0x25a0,
 };
 
 /* A target card. Those unlocked at boot stay listed, with a reference, to be
