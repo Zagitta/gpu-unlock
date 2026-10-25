@@ -32,6 +32,7 @@ whether it worked or not.
 | GA102 | RTX 3080 Ti 20 GB (OEM, GA102-250) | `10de:2205` | Unlock completes, BF16 stays at half rate | —        | [#28](https://github.com/Zagitta/gpu-unlock/issues/28) |
 | GA102 | RTX 3080 10 GB                    | `10de:2206` | Unlocked                            | +70–73%        | [#14](https://github.com/Zagitta/gpu-unlock/issues/14) |
 | GA102 | RTX 3080 20 GB (memory upgrade)   | `10de:2206` | Unlocked                            | +56–59%        | [#10](https://github.com/Zagitta/gpu-unlock/issues/10), [#15](https://github.com/Zagitta/gpu-unlock/issues/15) |
+| GA104 | RTX 3080 Laptop 16 GB (Legion 7)   | `10de:24dc` | Unlocked                            | +65%           | [Benchmark report](docs/benchmarks/rtx-3080-laptop-24dc.md) |
 | GA104 | RTX 3070                          | `10de:2484` | Unlocked                            | +73–81%        | [#10](https://github.com/Zagitta/gpu-unlock/issues/10), [#12](https://github.com/Zagitta/gpu-unlock/issues/12) |
 | GA104 | RTX 3070 Ti                       | `10de:2482` | Not tested with this module (the same unlock worked from a UEFI port on Windows) | — | [#32](https://github.com/Zagitta/gpu-unlock/issues/32) |
 | GA106 | RTX 3060 12 GB                    | `10de:2504` | Unlocked                            | about +80%     | [#13](https://github.com/Zagitta/gpu-unlock/pull/13), [#31](https://github.com/Zagitta/gpu-unlock/issues/31) |
@@ -41,11 +42,12 @@ The gains are dense GEMM throughput from each report's own benchmark, so
 they are not directly comparable. The power limit matters a lot: the lowest
 figure (+25%) is from cards capped at 225 W.
 
-Matrix-heavy work speeds up: LLM prefill (+14–36% in
+Matrix-heavy work speeds up: LLM prefill (+14–52% in
 [#9](https://github.com/Zagitta/gpu-unlock/issues/9),
 [#15](https://github.com/Zagitta/gpu-unlock/issues/15),
-[#25](https://github.com/Zagitta/gpu-unlock/issues/25) and
-[#33](https://github.com/Zagitta/gpu-unlock/issues/33)), diffusion and
+[#25](https://github.com/Zagitta/gpu-unlock/issues/25),
+[#33](https://github.com/Zagitta/gpu-unlock/issues/33), and the
+[RTX 3080 Laptop report](docs/benchmarks/rtx-3080-laptop-24dc.md)), diffusion and
 FlashAttention. LLM decode, which is limited by memory bandwidth, and INT8
 work stay about the same. The reports that compared outputs found them
 bit-identical before and after.
