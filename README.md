@@ -81,6 +81,11 @@ in `/etc/default/grub`, then run `sudo update-grub`.
 - **UKI / generated entries:** add it to `/etc/kernel/cmdline` and regenerate
 your boot images/entries (e.g. `sudo mkinitcpio -P` for mkinitcpio UKIs).
 
+On Fedora Atomic desktops (Silverblue, Kinoite, Bazzite), `/usr` is
+read-only and `make install` does not apply. With Secure Boot on, the module
+must also be signed with a key you enroll. See
+[Fedora Atomic and Secure Boot](docs/Fedora%20Atomic%20and%20Secure%20Boot.md).
+
 
 
 ## Local build
