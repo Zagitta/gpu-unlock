@@ -926,7 +926,8 @@ static int unlock_transaction_fwsec(struct unlock_transaction_work *work)
 	size_t mapped = 0;
 	u8 *rom = NULL;
 	struct gpu_unlock_fwsec fw;
-	u32 fuse_raw, version, scratch, wpr_lo, wpr_hi;
+	u32 fuse_raw, version, scratch, wpr_lo, wpr_hi, dmem_dma;
+	size_t alloc;
 	u16 command;
 	u64 frts = work->layout.frts_offset;
 	void *image = NULL;
@@ -955,14 +956,27 @@ static int unlock_transaction_fwsec(struct unlock_transaction_work *work)
 		ret = -EOPNOTSUPP;
 		goto out;
 	}
-	image = diag_dma_alloc(work, "fwsec", fw.image_size, &image_dma, GFP_KERNEL);
+	/* Falcon DMA moves 256-byte blocks. Some GA106 VBIOSes (e.g. 10de:2544,
+	 * FWSEC signatures=4 versions=0xf) carry a DMEM size that is not a
+	 * multiple of 256 (0x980). Round the transfer up and pad the buffer with
+	 * zeros so the last block stays inside our allocation. */
+	dmem_dma = (fw.dmem_size + 255u) & ~255u;
+	alloc = fw.image_size;
+	if ((size_t)fw.data_off + dmem_dma > alloc)
+		alloc = (size_t)fw.data_off + dmem_dma;
+	alloc = (alloc + 255u) & ~(size_t)255u;
+	if (dmem_dma != fw.dmem_size)
+		dev_info(&work->pdev->dev, "FWSEC: DMEM size %#x rounded to %#x for DMA (buffer %#zx)\n",
+			 fw.dmem_size, dmem_dma, alloc);
+	image = diag_dma_alloc(work, "fwsec", alloc, &image_dma, GFP_KERNEL);
 	if (!image) {
 		ret = -ENOMEM;
 		goto out;
 	}
 	work->fwsec_cpu = image;
 	work->fwsec_dma = image_dma;
-	work->fwsec_size = fw.image_size;
+	work->fwsec_size = alloc;
+	memset(image, 0, alloc);
 	memcpy(image, rom + fw.image_off, fw.image_size);
 	ret = gpu_unlock_fwsec_patch_frts(image, &fw, frts);
 	if (ret)
@@ -982,6 +996,16 @@ static int unlock_transaction_fwsec(struct unlock_transaction_work *work)
 			goto out;
 		memcpy((u8 *)image + fw.data_off + fw.pkc_off, rom + fw.sig_off + sig_at, 384);
 	}
+	/* Validate the Falcon DMA geometry before anything runs on the card, so
+	 * a layout we cannot load fails cleanly instead of leaving the card in a
+	 * state that needs a power cycle. */
+	if (!falcon_dma_valid(fw.imem_pa, fw.imem_va, image_dma - fw.imem_va, fw.imem_size) ||
+	    !falcon_dma_valid(fw.dmem_pa, 0, image_dma + fw.data_off, dmem_dma)) {
+		dev_err(&work->pdev->dev, "FWSEC: unloadable DMA geometry imem=%#x va=%#x pa=%#x dmem=%#x pa=%#x data_off=%#x\n",
+			fw.imem_size, fw.imem_va, fw.imem_pa, dmem_dma, fw.dmem_pa, fw.data_off);
+		ret = -EINVAL;
+		goto out;
+	}
 	pci_set_master(work->pdev);
 	work->master = true;
 	if (diag_pci_word(work, false, PCI_COMMAND, &command) ||
@@ -991,7 +1015,7 @@ static int unlock_transaction_fwsec(struct unlock_transaction_work *work)
 	}
 	work->firmware_started = true;
 	ret = falcon_hs(work, &gsp, 0, fw.imem_size, fw.imem_va, fw.imem_pa,
-			fw.data_off, fw.dmem_size, fw.dmem_pa, fw.pkc_off,
+			fw.data_off, dmem_dma, fw.dmem_pa, fw.pkc_off,
 			fw.engine_mask, fw.ucode_id,
 			image_dma, 0, 0, false);
 	if (ret)
