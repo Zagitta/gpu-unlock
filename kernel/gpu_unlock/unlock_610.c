@@ -3,7 +3,8 @@
  * Pre-driver V67 unlock, run before the stock driver binds: FWSEC-FRTS from
  * the board ROM, Booter with the V67 signature, the SS0/SS1 selector writes, then
  * FLR so the stock driver starts from a clean, halted GSP. After resume from
- * suspend it runs again on the card nvidia has suspended, before nvidia resumes it.
+ * suspend it runs again on resume-validated cards nvidia has suspended.
+ * Experimental AD107 is startup-only and rejects every resume attempt.
  */
 #include <linux/aperture.h>
 #include <linux/delay.h>
@@ -34,22 +35,25 @@
 #define GSP_FILE "gpu-unlock/610.43.03/gsp_ga10x.bin"
 #define BOOT_FILE "gpu-unlock/610.43.03/gsp_boot_ga102.bin"
 #define BOOT_DESC_FILE "gpu-unlock/610.43.03/gsp_boot_desc_ga102.bin"
-/* AD103 boots the AD102 Booter archive the pinned 610.43.03 source routes
- * every AD10x part through, with its own four-PLM V67 chain. */
-#define BOOTER_FILE_AD103 "gpu-unlock/610.43.03/booter_load_ad102.bin"
-#define V67_AD103_FILE "gpu-unlock/610.43.03/v67-ad102-610.43.03-four-plm.bin"
-#define BOOT_FILE_AD103 "gpu-unlock/610.43.03/gsp_boot_ad102.bin"
-#define BOOT_DESC_FILE_AD103 "gpu-unlock/610.43.03/gsp_boot_desc_ad102.bin"
+/* Supported Ada cards use the AD102 Booter archive the pinned 610.43.03
+ * source routes every AD10x part through, with the four-PLM V67 chain. */
+#define BOOTER_FILE_AD10X "gpu-unlock/610.43.03/booter_load_ad102.bin"
+#define V67_AD10X_FILE "gpu-unlock/610.43.03/v67-ad102-610.43.03-four-plm.bin"
+#define BOOT_FILE_AD10X "gpu-unlock/610.43.03/gsp_boot_ad102.bin"
+#define BOOT_DESC_FILE_AD10X "gpu-unlock/610.43.03/gsp_boot_desc_ad102.bin"
 #define GU_AD103_RTX_4080_SUPER 0x2702u
 #define GU_AD106_RTX_4060_TI 0x2803u
+#define GU_AD107_RTX_4060_LAPTOP 0x28a0u
+#define GU_AD107_PMC_BOOT_0 0x197000a1u
 /* Explicit success marker the AD10x chain leaves in SEC2 mailbox0. */
-#define GU_AD103_MARKER 0x67b00001u
+#define GU_AD10X_MARKER 0x67b00001u
 #define GU_SPEED_READOUT_MASK 0x07ffffffu /* FEATURE_READOUT_1: nine 3-bit fields */
 
-static bool is_ad103(const struct pci_dev *pdev)
+static bool is_ad10x(const struct pci_dev *pdev)
 {
 	return pdev->device == GU_AD103_RTX_4080_SUPER ||
-	       pdev->device == GU_AD106_RTX_4060_TI;
+	       pdev->device == GU_AD106_RTX_4060_TI ||
+	       pdev->device == GU_AD107_RTX_4060_LAPTOP;
 }
 
 struct unlock_assets {
@@ -64,12 +68,12 @@ static const struct unlock_assets *unlock_assets(const struct pci_dev *pdev)
 		.booter = BOOTER_FILE, .v67 = V67_FILE,
 		.boot = BOOT_FILE, .desc = BOOT_DESC_FILE, .boot_size = 24576,
 	};
-	static const struct unlock_assets ad103 = {
-		.booter = BOOTER_FILE_AD103, .v67 = V67_AD103_FILE,
-		.boot = BOOT_FILE_AD103, .desc = BOOT_DESC_FILE_AD103, .boot_size = 36864,
+	static const struct unlock_assets ad10x = {
+		.booter = BOOTER_FILE_AD10X, .v67 = V67_AD10X_FILE,
+		.boot = BOOT_FILE_AD10X, .desc = BOOT_DESC_FILE_AD10X, .boot_size = 36864,
 	};
 
-	return is_ad103(pdev) ? &ad103 : &ga102;
+	return is_ad10x(pdev) ? &ad10x : &ga102;
 }
 
 struct unlock_transaction_page {
@@ -122,7 +126,7 @@ struct unlock_transaction_work {
 	bool masks_saved;
 	bool firmware_started;
 	bool permission_saved, permission_sampled, payload_verified;
-	u32 permission_before[4]; /* ad103_permissions */
+	u32 permission_before[4]; /* ad10x_permissions */
 	u32 permission_after[4];
 	bool quiesced;
 	bool retained;
@@ -394,12 +398,12 @@ static int falcon_dma(struct unlock_transaction_work *work, u32 base, u32 dest, 
 	return GU_RESULT(poll_us(work, base + 0x118, 2, 2, 1000000, true));
 }
 
-/* The four PLM writes the AD103 payload performs; the readback contract. */
+/* The four PLM writes the AD10x payload performs; the readback contract. */
 static const struct {
 	const char *name;
 	u32 offset, expected;
 	bool required;
-} ad103_permissions[] = {
+} ad10x_permissions[] = {
 	{ "WPR_CFG", 0x001fa7cc, 0xfffff0ff, true },
 	{ "FBPA", 0x009a0148, 0xffffffff, false },
 	{ "WPR", 0x001fa7c4, 0xffffffff, true },
@@ -409,7 +413,7 @@ static const struct {
 /* A PLM may legitimately contain all ones. Independent PCI and BAR identity
  * checks distinguish that value from a generally inaccessible device.
  * All four samples are logged even when one fails, to keep partial evidence. */
-static int ad103_sample_permissions(struct unlock_transaction_work *work,
+static int ad10x_sample_permissions(struct unlock_transaction_work *work,
 				     const char *phase, u32 values[4])
 {
 	u32 identity = 0, chip = 0;
@@ -420,17 +424,17 @@ static int ad103_sample_permissions(struct unlock_transaction_work *work,
 	accessible = !diag_pci_dword(work, false, PCI_VENDOR_ID, &identity) &&
 		identity == pci_identity(work->pdev) &&
 		!read_bar(work, 0, &chip) && chip && !inaccessible(chip);
-	for (i = 0; i < ARRAY_SIZE(ad103_permissions); i++) {
+	for (i = 0; i < ARRAY_SIZE(ad10x_permissions); i++) {
 		bool valid;
 
 		values[i] = 0;
-		valid = !read_bar(work, ad103_permissions[i].offset, &values[i]) &&
+		valid = !read_bar(work, ad10x_permissions[i].offset, &values[i]) &&
 			(values[i] & 0xffff0000u) != 0xbadf0000u && accessible;
 		dev_info(&work->pdev->dev,
 			 "AD10x permission %s: %s[%#x]=%#x expected=%#x required=%u valid=%u pci=%#x\n",
-			 phase, ad103_permissions[i].name, ad103_permissions[i].offset,
-			 values[i], ad103_permissions[i].expected,
-			 ad103_permissions[i].required, valid, identity);
+			 phase, ad10x_permissions[i].name, ad10x_permissions[i].offset,
+			 values[i], ad10x_permissions[i].expected,
+			 ad10x_permissions[i].required, valid, identity);
 		if (!valid)
 			ret = -ENODEV;
 	}
@@ -439,7 +443,7 @@ static int ad103_sample_permissions(struct unlock_transaction_work *work,
 
 /* FEATURE_READOUT_1 carries nine 3-bit effective-speed fields; zero once
  * every override is in effect. */
-static int ad103_readout(struct unlock_transaction_work *work, const char *phase,
+static int ad10x_readout(struct unlock_transaction_work *work, const char *phase,
 			 bool require_full)
 {
 	u32 value = 0;
@@ -478,11 +482,11 @@ static int falcon_hs(struct unlock_transaction_work *work, const struct falcon_e
 	ret = falcon_reset(work, eng);
 	if (ret)
 		return GU_RESULT(ret);
-	if (wait_plm && is_ad103(work->pdev) &&
+	if (wait_plm && is_ad10x(work->pdev) &&
 	    (!work->v67_cpu || !work->v67_fw ||
 	     work->v67_fw->size != GU_V67_SIZE ||
 	     memcmp(work->v67_cpu, work->v67_fw->data, GU_V67_SIZE))) {
-		dev_err(&work->pdev->dev, "AD103 payload copy changed before SEC2 start; aborting\n");
+		dev_err(&work->pdev->dev, "AD10x payload copy changed before SEC2 start; aborting\n");
 		return GU_RESULT(-EIO);
 	}
 	if (read_bar(work, eng->fbif + 0x24, &trans) || inaccessible(trans))
@@ -531,13 +535,13 @@ static int falcon_hs(struct unlock_transaction_work *work, const struct falcon_e
 			    read_bar(work, eng->base + 0x100, &engine) || engine == ~0u ||
 			    (engine & 0xffff0000u) == 0xbadf0000u ||
 			    read_bar(work, GU_FEAT_PLM_OFFSET, &plm) ||
-			    (is_ad103(work->pdev) && read_bar(work, eng->base + 0x40, &marker)))
+			    (is_ad10x(work->pdev) && read_bar(work, eng->base + 0x40, &marker)))
 				return GU_RESULT(-ENODEV);
 			/* Cold entry was closed: this transition proves payload execution.
 			 * Ada's explicit marker is independent evidence that all-ones
 			 * PLM is the payload result, not a wired-open register. */
 			if (plm == ~0u && work->plm_entry != ~0u &&
-			    (!is_ad103(work->pdev) || marker == GU_AD103_MARKER))
+			    (!is_ad10x(work->pdev) || marker == GU_AD10X_MARKER))
 				return 0;
 			if ((engine & (1u << 4)) || ktime_compare(ktime_get(), deadline) >= 0)
 				dev_err(&work->pdev->dev, "early PLM failed: pci=%#x cpuctl=%#x plm=%#x entry=%#x budget_us=5000000\n",
@@ -1021,12 +1025,24 @@ static int unlock_transaction_claim(struct unlock_transaction_work *work)
 	ret = pci_save_state(work->pdev);
 	if (ret)
 		return GU_RESULT(ret);
-	if (work->mapped)
-		return 0;
-	work->bar = pci_iomap(work->pdev, 0, 0);
-	if (!work->bar)
-		return GU_RESULT(-ENOMEM);
-	work->mapped = true;
+	if (!work->mapped) {
+		work->bar = pci_iomap(work->pdev, 0, 0);
+		if (!work->bar)
+			return GU_RESULT(-ENOMEM);
+		work->mapped = true;
+	}
+	if (work->pdev->device == GU_AD107_RTX_4060_LAPTOP) {
+		u32 chip = 0;
+
+		/* Board identity alone is insufficient. Reject a different chip
+		 * before layout reads, coherent DMA, MMIO writes or firmware start. */
+		if (read_bar(work, 0, &chip) || chip != GU_AD107_PMC_BOOT_0) {
+			dev_err(&work->pdev->dev,
+				"AD107: PMC_BOOT_0=%#x expected=%#x; experimental board rejected\n",
+				chip, GU_AD107_PMC_BOOT_0);
+			return GU_RESULT(-ENODEV);
+		}
+	}
 	return 0;
 }
 
@@ -1210,14 +1226,14 @@ static int unlock_transaction_gfw(struct unlock_transaction_work *work)
 			/* An open PLM means the card was already unlocked or not cold. */
 			if (work->plm_entry == ~0u)
 				return GU_RESULT(-EALREADY);
-			if (is_ad103(work->pdev)) {
-				int r = ad103_sample_permissions(work, "before-firmware",
+			if (is_ad10x(work->pdev)) {
+				int r = ad10x_sample_permissions(work, "before-firmware",
 						 work->permission_before);
 
 				if (r)
 					return r;
 				work->permission_saved = true;
-				r = ad103_readout(work, "before-firmware", false);
+				r = ad10x_readout(work, "before-firmware", false);
 				if (r)
 					return r;
 			}
@@ -1289,14 +1305,14 @@ static int unlock_transaction_boot(struct unlock_transaction_work *work)
 
 	if (!work->published || !work->master || !work->firmware_started)
 		return GU_RESULT(-EINVAL);
-	if (is_ad103(work->pdev) && !work->permission_saved)
+	if (is_ad10x(work->pdev) && !work->permission_saved)
 		return GU_RESULT(-EINVAL);
 	ret = falcon_hs(work, &sec2, h->app_code_off, h->app_code_size,
 			h->app_code_off, 0, h->os_data_off, h->os_data_size, 0,
 			h->patch_loc - h->os_data_off, h->engine_id, h->ucode_id,
 			work->booter_dma, lower_32_bits(work->meta_dma),
 			upper_32_bits(work->meta_dma), true);
-	if (!is_ad103(work->pdev))
+	if (!is_ad10x(work->pdev))
 		return GU_RESULT(ret);
 	/* The marker precedes the cleanup tail. Wait for the exit before
 	 * changing firmware-visible metadata or applying selectors; a live
@@ -1305,10 +1321,10 @@ static int unlock_transaction_boot(struct unlock_transaction_work *work)
 	state_ret = read_bar(work, SEC2_BASE + 0x40, &marker);
 	state_ret |= read_bar(work, SEC2_BASE + 0x100, &cpuctl);
 	work->permission_sampled = true;
-	ret = ad103_sample_permissions(work, "after-payload", work->permission_after);
-	for (i = 0; i < ARRAY_SIZE(ad103_permissions); i++)
-		if (ad103_permissions[i].required &&
-		    work->permission_after[i] != ad103_permissions[i].expected)
+	ret = ad10x_sample_permissions(work, "after-payload", work->permission_after);
+	for (i = 0; i < ARRAY_SIZE(ad10x_permissions); i++)
+		if (ad10x_permissions[i].required &&
+		    work->permission_after[i] != ad10x_permissions[i].expected)
 			required = false;
 	/* Independently readable feature words reject a disconnected or
 	 * protected BAR view even when every sampled PLM happens to be ones. */
@@ -1316,14 +1332,14 @@ static int unlock_transaction_boot(struct unlock_transaction_work *work)
 	state_ret |= read_bar(work, GU_FEAT_SS1_OFFSET, &ss1);
 	if (inaccessible(ss0) || inaccessible(ss1))
 		state_ret = -ENODEV;
-	if (ad103_readout(work, "after-payload", false))
+	if (ad10x_readout(work, "after-payload", false))
 		state_ret = -ENODEV;
 	dev_info(&work->pdev->dev,
 		 "AD10x payload result: boot=%d halt=%d marker=%#x expected=%#x marker_ok=%u required_permissions=%u cpuctl=%#x halted=%u ss0=%#x ss1=%#x\n",
-		 ret, halt_ret, marker, GU_AD103_MARKER, marker == GU_AD103_MARKER,
+		 ret, halt_ret, marker, GU_AD10X_MARKER, marker == GU_AD10X_MARKER,
 		 required, cpuctl, !!(cpuctl & 0x10), ss0, ss1);
 	if (ret || halt_ret || state_ret ||
-	    !required || marker != GU_AD103_MARKER || !(cpuctl & 0x10))
+	    !required || marker != GU_AD10X_MARKER || !(cpuctl & 0x10))
 		return GU_RESULT(ret ? ret : halt_ret ? halt_ret :
 				 state_ret ? -ENODEV : -EIO);
 	work->payload_verified = true;
@@ -1395,7 +1411,7 @@ static int unlock_transaction_selector(struct unlock_transaction_work *work)
 	int ret;
 
 	/* Apply full-rate selectors only after the payload has been verified. */
-	if (is_ad103(work->pdev) && !work->payload_verified)
+	if (is_ad10x(work->pdev) && !work->payload_verified)
 		return GU_RESULT(-EPROTO);
 	ret = write_selector(work, "SS0", GU_FEAT_SS0_OFFSET, GU_SS0_UNLOCK);
 	if (ret)
@@ -1403,8 +1419,8 @@ static int unlock_transaction_selector(struct unlock_transaction_work *work)
 	ret = write_selector(work, "SS1", GU_FEAT_SS1_OFFSET, GU_SS1_UNLOCK);
 	if (ret)
 		return ret;
-	if (is_ad103(work->pdev))
-		ret = ad103_readout(work, "selectors-applied", true);
+	if (is_ad10x(work->pdev))
+		ret = ad10x_readout(work, "selectors-applied", true);
 	return ret;
 }
 
@@ -1641,16 +1657,16 @@ static int unlock_transaction_reset(struct unlock_transaction_work *work)
 	work->quiesced = true;
 	if (ss0 != GU_SS0_UNLOCK || ss1 != GU_SS1_UNLOCK)
 		return GU_RESULT(-EIO);
-	if (is_ad103(work->pdev)) {
+	if (is_ad10x(work->pdev)) {
 		/* The FEAT PLM override must survive the FLR: the selectors it
 		 * unlocked stay effective for the stock driver. */
 		if (plm != ~0u) {
 			dev_err(&work->pdev->dev, "post-FLR FEAT PLM lost: %#x\n", plm);
 			return GU_RESULT(-EIO);
 		}
-		if (ad103_sample_permissions(work, "post-FLR", work->permission_after))
+		if (ad10x_sample_permissions(work, "post-FLR", work->permission_after))
 			return GU_RESULT(-ENODEV);
-		return ad103_readout(work, "post-FLR", true);
+		return ad10x_readout(work, "post-FLR", true);
 	}
 	return 0;
 }
@@ -1671,6 +1687,21 @@ int gpu_unlock_610_unlock(struct pci_dev *pdev, const struct gpu_unlock_610_shar
 {
 	struct unlock_transaction_work *work;
 	int ret, cleanup;
+
+	if (pdev->device == GU_AD107_RTX_4060_LAPTOP) {
+		/* The opt-in is enforced by main.c. Keep the transaction itself
+		 * fail-closed for unvalidated boards and every PM-resume call. */
+		if (resume) {
+			dev_err(&pdev->dev, "AD107: experimental resume re-unlock is disabled\n");
+			return -EOPNOTSUPP;
+		}
+		if (pdev->vendor != 0x10de || pdev->subsystem_vendor != 0x1d05 ||
+		    pdev->subsystem_device != 0x1274 || pdev->revision != 0xa1) {
+			dev_err(&pdev->dev,
+				"AD107: requires subsystem 1d05:1274 revision a1; board rejected\n");
+			return -ENODEV;
+		}
+	}
 
 	work = kzalloc(sizeof(*work), GFP_KERNEL);
 	if (!work)
@@ -1706,8 +1737,8 @@ int gpu_unlock_610_unlock(struct pci_dev *pdev, const struct gpu_unlock_610_shar
 	/* Never leave the V67 signature published for a later stock boot. */
 	if (ret && work->signature_calls == 1)
 		unlock_transaction_signature(work);
-	if (is_ad103(work->pdev) && work->permission_saved && !work->permission_sampled && work->mapped)
-		ad103_sample_permissions(work, "abort", work->permission_after);
+	if (is_ad10x(work->pdev) && work->permission_saved && !work->permission_sampled && work->mapped)
+		ad10x_sample_permissions(work, "abort", work->permission_after);
 	cleanup = unlock_transaction_unwind(work);
 	if (!ret)
 		ret = cleanup;
@@ -1724,11 +1755,11 @@ int gpu_unlock_610_unlock(struct pci_dev *pdev, const struct gpu_unlock_610_shar
 }
 
 MODULE_FIRMWARE(BOOTER_FILE);
-MODULE_FIRMWARE(BOOTER_FILE_AD103);
+MODULE_FIRMWARE(BOOTER_FILE_AD10X);
 MODULE_FIRMWARE(V67_FILE);
-MODULE_FIRMWARE(V67_AD103_FILE);
+MODULE_FIRMWARE(V67_AD10X_FILE);
 MODULE_FIRMWARE(GSP_FILE);
 MODULE_FIRMWARE(BOOT_FILE);
 MODULE_FIRMWARE(BOOT_DESC_FILE);
-MODULE_FIRMWARE(BOOT_FILE_AD103);
-MODULE_FIRMWARE(BOOT_DESC_FILE_AD103);
+MODULE_FIRMWARE(BOOT_FILE_AD10X);
+MODULE_FIRMWARE(BOOT_DESC_FILE_AD10X);

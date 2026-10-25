@@ -2,8 +2,8 @@
 
 One card (10de:2803), one boot, driver 615.71.09, firmware inputs
 pinned to 610.43.03. The pinned source routes AD106 through the same
-AD102 Booter/GspRmBoot archives as AD103, so the port is the device ID
-plus routing the asset selection through is_ad103().
+AD102 Booter/GspRmBoot archives as AD103, so this path uses the shared
+AD10x asset selection and safety gates in `is_ad10x()`.
 
 - `boot-log.txt` — successful transaction (`gpu_unlock: unlocked`),
   marker 0x67b00001, required permissions readback, readout1 zero

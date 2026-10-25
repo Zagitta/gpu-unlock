@@ -1,0 +1,1357 @@
+{
+  "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU (AD107M)",
+  "pci_id": "10de:28a0",
+  "subsystem_id": "1d05:1274",
+  "subsystem_vendor": "AIstone Global Limited",
+  "revision": "a1",
+  "pmc_boot_0": "0x197000a1",
+  "vbios_version": "95.07.16.80.E1",
+  "physical_vram_gib": 8,
+  "reported_vram_mib": 8188,
+  "sm_count": 24,
+  "compute_capability": "8.9",
+  "driver": "615.78.08",
+  "stock_kernel": "7.2.8-9-omarchy",
+  "unlocked_kernel": "7.2.8-10-omarchy",
+  "validation_scope": "One experimental startup boot of a local guarded fork; proposed upstream module not physically booted. No independent observation of the physical power-off action.",
+  "firmware_input_version": "610.43.03",
+  "source_base": "JustAResearcher/gpu-unlock-ada@491925c1079435e260137b9f3526066e764de830 plus guarded local AD107 changes",
+  "transaction": {
+    "payload_marker": "0x67b00001",
+    "marker_ok": true,
+    "required_permissions": true,
+    "flr_returncode": 0,
+    "selector_ss0_before": "0x67267154",
+    "selector_ss1_before": "0x1",
+    "raw_readout_before": "0x00410080",
+    "selector_ss0_after_flr": "0x88888888",
+    "selector_ss1_after_flr": "0x8",
+    "raw_readout_after_flr": "0x0",
+    "raw_field_layout_not_assumed": true,
+    "nvidia_driver_loaded": true
+  },
+  "rm_command": "0x20801230",
+  "stock_rates": {
+    "imla0": 0,
+    "fmla16": 0,
+    "dp": 0,
+    "fmla32": 1,
+    "ffma": 0,
+    "imla1": 0,
+    "imla2": 1,
+    "imla3": 0,
+    "imla4": 1
+  },
+  "unlocked_rates": {
+    "imla0": 0,
+    "fmla16": 0,
+    "dp": 0,
+    "fmla32": 0,
+    "ffma": 0,
+    "imla1": 0,
+    "imla2": 0,
+    "imla3": 0,
+    "imla4": 0
+  },
+  "benchmark": {
+    "stock": {
+      "pci": "0000:01:00.0",
+      "sm_count": 24,
+      "compute_capability": "8.9",
+      "ptx_sha256": "c937fdef3ed6719e46b05869c6983149d7c8ec8ad1bbcf8ef7ca33a13a097051",
+      "blocks": 768,
+      "threads": 256,
+      "iterations": 1024,
+      "independent_chains": 8,
+      "repetitions": 5,
+      "clocks_locked": false,
+      "hardware_configuration_writes": false,
+      "modes": {
+        "fp16_fp16": {
+          "registers_per_thread": 28,
+          "local_bytes_per_thread": 0,
+          "instruction": "mma.sync.aligned.m16n8k16.row.col.f16.f16.f16.f16",
+          "samples": [
+            {
+              "ms": 3.598144054412842,
+              "tera_ops_per_s": 57.29576889929208,
+              "before": {
+                "sm_mhz": 300,
+                "temperature_c": 59,
+                "power_mw": 10221
+              },
+              "after": {
+                "sm_mhz": 300,
+                "temperature_c": 59,
+                "power_mw": 10221
+              }
+            },
+            {
+              "ms": 3.471872091293335,
+              "tera_ops_per_s": 59.37961560421492,
+              "before": {
+                "sm_mhz": 300,
+                "temperature_c": 59,
+                "power_mw": 10221
+              },
+              "after": {
+                "sm_mhz": 300,
+                "temperature_c": 59,
+                "power_mw": 10221
+              }
+            },
+            {
+              "ms": 3.471519947052002,
+              "tera_ops_per_s": 59.38563895709969,
+              "before": {
+                "sm_mhz": 300,
+                "temperature_c": 59,
+                "power_mw": 10221
+              },
+              "after": {
+                "sm_mhz": 300,
+                "temperature_c": 59,
+                "power_mw": 10221
+              }
+            },
+            {
+              "ms": 4.336383819580078,
+              "tera_ops_per_s": 47.541555080325836,
+              "before": {
+                "sm_mhz": 2490,
+                "temperature_c": 61,
+                "power_mw": 17163
+              },
+              "after": {
+                "sm_mhz": 2490,
+                "temperature_c": 61,
+                "power_mw": 17163
+              }
+            },
+            {
+              "ms": 3.472480058670044,
+              "tera_ops_per_s": 59.36921932590117,
+              "before": {
+                "sm_mhz": 2490,
+                "temperature_c": 61,
+                "power_mw": 17163
+              },
+              "after": {
+                "sm_mhz": 2490,
+                "temperature_c": 61,
+                "power_mw": 17163
+              }
+            }
+          ],
+          "numeric_checks": [
+            {
+              "iterations": 16,
+              "expected": 8192,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 524288,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 524288,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 524288,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 524288,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 524288,
+              "cells_checked": 196608,
+              "mismatches": 0
+            }
+          ],
+          "median_tera_ops_per_s": 59.36921932590117,
+          "min_tera_ops_per_s": 47.541555080325836,
+          "max_tera_ops_per_s": 59.38563895709969
+        },
+        "fp16_fp32": {
+          "registers_per_thread": 44,
+          "local_bytes_per_thread": 0,
+          "instruction": "mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32",
+          "samples": [
+            {
+              "ms": 7.778528213500977,
+              "tera_ops_per_s": 26.503526701899276,
+              "before": {
+                "sm_mhz": 300,
+                "temperature_c": 59,
+                "power_mw": 10221
+              },
+              "after": {
+                "sm_mhz": 300,
+                "temperature_c": 59,
+                "power_mw": 10221
+              }
+            },
+            {
+              "ms": 6.81935977935791,
+              "tera_ops_per_s": 30.231346765430704,
+              "before": {
+                "sm_mhz": 300,
+                "temperature_c": 59,
+                "power_mw": 10221
+              },
+              "after": {
+                "sm_mhz": 300,
+                "temperature_c": 59,
+                "power_mw": 10221
+              }
+            },
+            {
+              "ms": 7.628352165222168,
+              "tera_ops_per_s": 27.025290094482134,
+              "before": {
+                "sm_mhz": 300,
+                "temperature_c": 59,
+                "power_mw": 10221
+              },
+              "after": {
+                "sm_mhz": 300,
+                "temperature_c": 59,
+                "power_mw": 10221
+              }
+            },
+            {
+              "ms": 7.630752086639404,
+              "tera_ops_per_s": 27.016790464069775,
+              "before": {
+                "sm_mhz": 2490,
+                "temperature_c": 61,
+                "power_mw": 17163
+              },
+              "after": {
+                "sm_mhz": 2490,
+                "temperature_c": 61,
+                "power_mw": 17163
+              }
+            },
+            {
+              "ms": 6.8164801597595215,
+              "tera_ops_per_s": 30.244117987027643,
+              "before": {
+                "sm_mhz": 2490,
+                "temperature_c": 61,
+                "power_mw": 17163
+              },
+              "after": {
+                "sm_mhz": 2490,
+                "temperature_c": 61,
+                "power_mw": 17163
+              }
+            }
+          ],
+          "numeric_checks": [
+            {
+              "iterations": 16,
+              "expected": 8192,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 524288,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 524288,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 524288,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 524288,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 524288,
+              "cells_checked": 196608,
+              "mismatches": 0
+            }
+          ],
+          "median_tera_ops_per_s": 27.025290094482134,
+          "min_tera_ops_per_s": 26.503526701899276,
+          "max_tera_ops_per_s": 30.244117987027643
+        },
+        "bf16_fp32": {
+          "registers_per_thread": 44,
+          "local_bytes_per_thread": 0,
+          "instruction": "mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32",
+          "samples": [
+            {
+              "ms": 7.755904197692871,
+              "tera_ops_per_s": 26.58083763712881,
+              "before": {
+                "sm_mhz": 300,
+                "temperature_c": 59,
+                "power_mw": 10221
+              },
+              "after": {
+                "sm_mhz": 300,
+                "temperature_c": 59,
+                "power_mw": 10221
+              }
+            },
+            {
+              "ms": 6.825823783874512,
+              "tera_ops_per_s": 30.202717904179355,
+              "before": {
+                "sm_mhz": 300,
+                "temperature_c": 59,
+                "power_mw": 10221
+              },
+              "after": {
+                "sm_mhz": 300,
+                "temperature_c": 59,
+                "power_mw": 10221
+              }
+            },
+            {
+              "ms": 6.819647789001465,
+              "tera_ops_per_s": 30.23007002509521,
+              "before": {
+                "sm_mhz": 300,
+                "temperature_c": 59,
+                "power_mw": 10221
+              },
+              "after": {
+                "sm_mhz": 300,
+                "temperature_c": 59,
+                "power_mw": 10221
+              }
+            },
+            {
+              "ms": 7.707776069641113,
+              "tera_ops_per_s": 26.746811057472648,
+              "before": {
+                "sm_mhz": 2490,
+                "temperature_c": 61,
+                "power_mw": 17163
+              },
+              "after": {
+                "sm_mhz": 2490,
+                "temperature_c": 61,
+                "power_mw": 17163
+              }
+            },
+            {
+              "ms": 7.658400058746338,
+              "tera_ops_per_s": 26.91925580102793,
+              "before": {
+                "sm_mhz": 2490,
+                "temperature_c": 61,
+                "power_mw": 17163
+              },
+              "after": {
+                "sm_mhz": 2490,
+                "temperature_c": 61,
+                "power_mw": 17163
+              }
+            }
+          ],
+          "numeric_checks": [
+            {
+              "iterations": 16,
+              "expected": 8192,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 524288,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 524288,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 524288,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 524288,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 524288,
+              "cells_checked": 196608,
+              "mismatches": 0
+            }
+          ],
+          "median_tera_ops_per_s": 26.91925580102793,
+          "min_tera_ops_per_s": 26.58083763712881,
+          "max_tera_ops_per_s": 30.23007002509521
+        },
+        "tf32_fp32": {
+          "registers_per_thread": 44,
+          "local_bytes_per_thread": 0,
+          "instruction": "mma.sync.aligned.m16n8k8.row.col.f32.tf32.tf32.f32",
+          "samples": [
+            {
+              "ms": 7.754816055297852,
+              "tera_ops_per_s": 13.292283707178258,
+              "before": {
+                "sm_mhz": 300,
+                "temperature_c": 59,
+                "power_mw": 10221
+              },
+              "after": {
+                "sm_mhz": 300,
+                "temperature_c": 59,
+                "power_mw": 10221
+              }
+            },
+            {
+              "ms": 6.821119785308838,
+              "tera_ops_per_s": 15.111773190966314,
+              "before": {
+                "sm_mhz": 300,
+                "temperature_c": 59,
+                "power_mw": 10221
+              },
+              "after": {
+                "sm_mhz": 300,
+                "temperature_c": 59,
+                "power_mw": 10221
+              }
+            },
+            {
+              "ms": 7.677248001098633,
+              "tera_ops_per_s": 13.42658399067597,
+              "before": {
+                "sm_mhz": 300,
+                "temperature_c": 59,
+                "power_mw": 10221
+              },
+              "after": {
+                "sm_mhz": 300,
+                "temperature_c": 59,
+                "power_mw": 10221
+              }
+            },
+            {
+              "ms": 7.658112049102783,
+              "tera_ops_per_s": 13.460134096115329,
+              "before": {
+                "sm_mhz": 2490,
+                "temperature_c": 61,
+                "power_mw": 17163
+              },
+              "after": {
+                "sm_mhz": 2490,
+                "temperature_c": 61,
+                "power_mw": 17163
+              }
+            },
+            {
+              "ms": 7.670783996582031,
+              "tera_ops_per_s": 13.437898283921216,
+              "before": {
+                "sm_mhz": 2490,
+                "temperature_c": 61,
+                "power_mw": 17163
+              },
+              "after": {
+                "sm_mhz": 2490,
+                "temperature_c": 61,
+                "power_mw": 17163
+              }
+            }
+          ],
+          "numeric_checks": [
+            {
+              "iterations": 16,
+              "expected": 4096,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 262144,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 262144,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 262144,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 262144,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 262144,
+              "cells_checked": 196608,
+              "mismatches": 0
+            }
+          ],
+          "median_tera_ops_per_s": 13.437898283921216,
+          "min_tera_ops_per_s": 13.292283707178258,
+          "max_tera_ops_per_s": 15.111773190966314
+        },
+        "int8_int32": {
+          "registers_per_thread": 44,
+          "local_bytes_per_thread": 0,
+          "instruction": "mma.sync.aligned.m16n8k32.row.col.s32.s8.s8.s32",
+          "samples": [
+            {
+              "ms": 3.4527359008789062,
+              "tera_ops_per_s": 119.41743366790472,
+              "before": {
+                "sm_mhz": 300,
+                "temperature_c": 59,
+                "power_mw": 10221
+              },
+              "after": {
+                "sm_mhz": 300,
+                "temperature_c": 59,
+                "power_mw": 10221
+              }
+            },
+            {
+              "ms": 3.451904058456421,
+              "tera_ops_per_s": 119.44621097040996,
+              "before": {
+                "sm_mhz": 300,
+                "temperature_c": 59,
+                "power_mw": 10221
+              },
+              "after": {
+                "sm_mhz": 300,
+                "temperature_c": 59,
+                "power_mw": 10221
+              }
+            },
+            {
+              "ms": 3.4521279335021973,
+              "tera_ops_per_s": 119.43846472621973,
+              "before": {
+                "sm_mhz": 300,
+                "temperature_c": 59,
+                "power_mw": 10221
+              },
+              "after": {
+                "sm_mhz": 300,
+                "temperature_c": 59,
+                "power_mw": 10221
+              }
+            },
+            {
+              "ms": 3.4515199661254883,
+              "tera_ops_per_s": 119.45950319355887,
+              "before": {
+                "sm_mhz": 2490,
+                "temperature_c": 61,
+                "power_mw": 17163
+              },
+              "after": {
+                "sm_mhz": 2490,
+                "temperature_c": 61,
+                "power_mw": 17163
+              }
+            },
+            {
+              "ms": 3.4522879123687744,
+              "tera_ops_per_s": 119.4329299531366,
+              "before": {
+                "sm_mhz": 2490,
+                "temperature_c": 61,
+                "power_mw": 17163
+              },
+              "after": {
+                "sm_mhz": 2490,
+                "temperature_c": 61,
+                "power_mw": 17163
+              }
+            }
+          ],
+          "numeric_checks": [
+            {
+              "iterations": 16,
+              "expected": 16384,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 1048576,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 1048576,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 1048576,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 1048576,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 1048576,
+              "cells_checked": 196608,
+              "mismatches": 0
+            }
+          ],
+          "median_tera_ops_per_s": 119.43846472621973,
+          "min_tera_ops_per_s": 119.41743366790472,
+          "max_tera_ops_per_s": 119.45950319355887
+        }
+      },
+      "before": {
+        "sm_mhz": 300,
+        "temperature_c": 58,
+        "power_mw": 10221
+      },
+      "after": {
+        "sm_mhz": 2490,
+        "temperature_c": 61,
+        "power_mw": 17163
+      },
+      "cleanup_errors": [],
+      "wall_seconds": 0.8336837530077901
+    },
+    "unlocked": {
+      "pci": "0000:01:00.0",
+      "sm_count": 24,
+      "compute_capability": "8.9",
+      "ptx_sha256": "c937fdef3ed6719e46b05869c6983149d7c8ec8ad1bbcf8ef7ca33a13a097051",
+      "blocks": 768,
+      "threads": 256,
+      "iterations": 1024,
+      "independent_chains": 8,
+      "repetitions": 5,
+      "clocks_locked": false,
+      "hardware_configuration_writes": false,
+      "modes": {
+        "fp16_fp16": {
+          "registers_per_thread": 28,
+          "local_bytes_per_thread": 0,
+          "instruction": "mma.sync.aligned.m16n8k16.row.col.f16.f16.f16.f16",
+          "samples": [
+            {
+              "ms": 3.5778560638427734,
+              "tera_ops_per_s": 57.620660677606146,
+              "before": {
+                "sm_mhz": 975,
+                "temperature_c": 56,
+                "power_mw": 12059
+              },
+              "after": {
+                "sm_mhz": 975,
+                "temperature_c": 56,
+                "power_mw": 12059
+              }
+            },
+            {
+              "ms": 4.26691198348999,
+              "tera_ops_per_s": 48.31560411972197,
+              "before": {
+                "sm_mhz": 975,
+                "temperature_c": 56,
+                "power_mw": 12059
+              },
+              "after": {
+                "sm_mhz": 975,
+                "temperature_c": 56,
+                "power_mw": 12059
+              }
+            },
+            {
+              "ms": 3.4787840843200684,
+              "tera_ops_per_s": 59.26163429837982,
+              "before": {
+                "sm_mhz": 975,
+                "temperature_c": 56,
+                "power_mw": 12059
+              },
+              "after": {
+                "sm_mhz": 975,
+                "temperature_c": 56,
+                "power_mw": 12059
+              }
+            },
+            {
+              "ms": 3.472032070159912,
+              "tera_ops_per_s": 59.3768796031037,
+              "before": {
+                "sm_mhz": 975,
+                "temperature_c": 58,
+                "power_mw": 12059
+              },
+              "after": {
+                "sm_mhz": 975,
+                "temperature_c": 58,
+                "power_mw": 12059
+              }
+            },
+            {
+              "ms": 3.4730560779571533,
+              "tera_ops_per_s": 59.35937271973509,
+              "before": {
+                "sm_mhz": 975,
+                "temperature_c": 58,
+                "power_mw": 12059
+              },
+              "after": {
+                "sm_mhz": 975,
+                "temperature_c": 58,
+                "power_mw": 12059
+              }
+            }
+          ],
+          "numeric_checks": [
+            {
+              "iterations": 16,
+              "expected": 8192,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 524288,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 524288,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 524288,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 524288,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 524288,
+              "cells_checked": 196608,
+              "mismatches": 0
+            }
+          ],
+          "median_tera_ops_per_s": 59.26163429837982,
+          "min_tera_ops_per_s": 48.31560411972197,
+          "max_tera_ops_per_s": 59.3768796031037
+        },
+        "fp16_fp32": {
+          "registers_per_thread": 44,
+          "local_bytes_per_thread": 0,
+          "instruction": "mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32",
+          "samples": [
+            {
+              "ms": 4.539391994476318,
+              "tera_ops_per_s": 45.41542798217478,
+              "before": {
+                "sm_mhz": 975,
+                "temperature_c": 56,
+                "power_mw": 12059
+              },
+              "after": {
+                "sm_mhz": 975,
+                "temperature_c": 56,
+                "power_mw": 12059
+              }
+            },
+            {
+              "ms": 3.630784034729004,
+              "tera_ops_per_s": 56.7806920588124,
+              "before": {
+                "sm_mhz": 975,
+                "temperature_c": 56,
+                "power_mw": 12059
+              },
+              "after": {
+                "sm_mhz": 975,
+                "temperature_c": 56,
+                "power_mw": 12059
+              }
+            },
+            {
+              "ms": 3.790623903274536,
+              "tera_ops_per_s": 54.386411173609105,
+              "before": {
+                "sm_mhz": 975,
+                "temperature_c": 56,
+                "power_mw": 12059
+              },
+              "after": {
+                "sm_mhz": 975,
+                "temperature_c": 56,
+                "power_mw": 12059
+              }
+            },
+            {
+              "ms": 4.079455852508545,
+              "tera_ops_per_s": 50.53576694088471,
+              "before": {
+                "sm_mhz": 975,
+                "temperature_c": 58,
+                "power_mw": 12059
+              },
+              "after": {
+                "sm_mhz": 975,
+                "temperature_c": 58,
+                "power_mw": 12059
+              }
+            },
+            {
+              "ms": 3.6136319637298584,
+              "tera_ops_per_s": 57.05020109330969,
+              "before": {
+                "sm_mhz": 975,
+                "temperature_c": 58,
+                "power_mw": 12059
+              },
+              "after": {
+                "sm_mhz": 975,
+                "temperature_c": 58,
+                "power_mw": 12059
+              }
+            }
+          ],
+          "numeric_checks": [
+            {
+              "iterations": 16,
+              "expected": 8192,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 524288,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 524288,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 524288,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 524288,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 524288,
+              "cells_checked": 196608,
+              "mismatches": 0
+            }
+          ],
+          "median_tera_ops_per_s": 54.386411173609105,
+          "min_tera_ops_per_s": 45.41542798217478,
+          "max_tera_ops_per_s": 57.05020109330969
+        },
+        "bf16_fp32": {
+          "registers_per_thread": 44,
+          "local_bytes_per_thread": 0,
+          "instruction": "mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32",
+          "samples": [
+            {
+              "ms": 3.6320960521698,
+              "tera_ops_per_s": 56.76018124158412,
+              "before": {
+                "sm_mhz": 975,
+                "temperature_c": 56,
+                "power_mw": 12059
+              },
+              "after": {
+                "sm_mhz": 975,
+                "temperature_c": 56,
+                "power_mw": 12059
+              }
+            },
+            {
+              "ms": 3.6342720985412598,
+              "tera_ops_per_s": 56.72619567773937,
+              "before": {
+                "sm_mhz": 975,
+                "temperature_c": 56,
+                "power_mw": 12059
+              },
+              "after": {
+                "sm_mhz": 975,
+                "temperature_c": 56,
+                "power_mw": 12059
+              }
+            },
+            {
+              "ms": 3.45580792427063,
+              "tera_ops_per_s": 59.65563906492605,
+              "before": {
+                "sm_mhz": 975,
+                "temperature_c": 56,
+                "power_mw": 12059
+              },
+              "after": {
+                "sm_mhz": 975,
+                "temperature_c": 56,
+                "power_mw": 12059
+              }
+            },
+            {
+              "ms": 3.4615039825439453,
+              "tera_ops_per_s": 59.55747306593854,
+              "before": {
+                "sm_mhz": 975,
+                "temperature_c": 58,
+                "power_mw": 12059
+              },
+              "after": {
+                "sm_mhz": 975,
+                "temperature_c": 58,
+                "power_mw": 12059
+              }
+            },
+            {
+              "ms": 3.459455966949463,
+              "tera_ops_per_s": 59.592731394060735,
+              "before": {
+                "sm_mhz": 975,
+                "temperature_c": 58,
+                "power_mw": 12059
+              },
+              "after": {
+                "sm_mhz": 975,
+                "temperature_c": 58,
+                "power_mw": 12059
+              }
+            }
+          ],
+          "numeric_checks": [
+            {
+              "iterations": 16,
+              "expected": 8192,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 524288,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 524288,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 524288,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 524288,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 524288,
+              "cells_checked": 196608,
+              "mismatches": 0
+            }
+          ],
+          "median_tera_ops_per_s": 59.55747306593854,
+          "min_tera_ops_per_s": 56.72619567773937,
+          "max_tera_ops_per_s": 59.65563906492605
+        },
+        "tf32_fp32": {
+          "registers_per_thread": 44,
+          "local_bytes_per_thread": 0,
+          "instruction": "mma.sync.aligned.m16n8k8.row.col.f32.tf32.tf32.f32",
+          "samples": [
+            {
+              "ms": 3.6312320232391357,
+              "tera_ops_per_s": 28.38684348571347,
+              "before": {
+                "sm_mhz": 975,
+                "temperature_c": 56,
+                "power_mw": 12059
+              },
+              "after": {
+                "sm_mhz": 975,
+                "temperature_c": 56,
+                "power_mw": 12059
+              }
+            },
+            {
+              "ms": 3.6394879817962646,
+              "tera_ops_per_s": 28.322449646646554,
+              "before": {
+                "sm_mhz": 975,
+                "temperature_c": 56,
+                "power_mw": 12059
+              },
+              "after": {
+                "sm_mhz": 975,
+                "temperature_c": 56,
+                "power_mw": 12059
+              }
+            },
+            {
+              "ms": 3.4559359550476074,
+              "tera_ops_per_s": 29.826714512300626,
+              "before": {
+                "sm_mhz": 975,
+                "temperature_c": 56,
+                "power_mw": 12059
+              },
+              "after": {
+                "sm_mhz": 975,
+                "temperature_c": 56,
+                "power_mw": 12059
+              }
+            },
+            {
+              "ms": 3.4573121070861816,
+              "tera_ops_per_s": 29.81484225642418,
+              "before": {
+                "sm_mhz": 975,
+                "temperature_c": 56,
+                "power_mw": 12059
+              },
+              "after": {
+                "sm_mhz": 975,
+                "temperature_c": 56,
+                "power_mw": 12059
+              }
+            },
+            {
+              "ms": 3.4573121070861816,
+              "tera_ops_per_s": 29.81484225642418,
+              "before": {
+                "sm_mhz": 975,
+                "temperature_c": 58,
+                "power_mw": 12059
+              },
+              "after": {
+                "sm_mhz": 975,
+                "temperature_c": 58,
+                "power_mw": 12059
+              }
+            }
+          ],
+          "numeric_checks": [
+            {
+              "iterations": 16,
+              "expected": 4096,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 262144,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 262144,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 262144,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 262144,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 262144,
+              "cells_checked": 196608,
+              "mismatches": 0
+            }
+          ],
+          "median_tera_ops_per_s": 29.81484225642418,
+          "min_tera_ops_per_s": 28.322449646646554,
+          "max_tera_ops_per_s": 29.826714512300626
+        },
+        "int8_int32": {
+          "registers_per_thread": 44,
+          "local_bytes_per_thread": 0,
+          "instruction": "mma.sync.aligned.m16n8k32.row.col.s32.s8.s8.s32",
+          "samples": [
+            {
+              "ms": 4.553952217102051,
+              "tera_ops_per_s": 90.54044503751548,
+              "before": {
+                "sm_mhz": 975,
+                "temperature_c": 56,
+                "power_mw": 12059
+              },
+              "after": {
+                "sm_mhz": 975,
+                "temperature_c": 56,
+                "power_mw": 12059
+              }
+            },
+            {
+              "ms": 3.625760078430176,
+              "tera_ops_per_s": 113.71873800169327,
+              "before": {
+                "sm_mhz": 975,
+                "temperature_c": 56,
+                "power_mw": 12059
+              },
+              "after": {
+                "sm_mhz": 975,
+                "temperature_c": 56,
+                "power_mw": 12059
+              }
+            },
+            {
+              "ms": 4.0794878005981445,
+              "tera_ops_per_s": 101.07074235043554,
+              "before": {
+                "sm_mhz": 975,
+                "temperature_c": 56,
+                "power_mw": 12059
+              },
+              "after": {
+                "sm_mhz": 975,
+                "temperature_c": 56,
+                "power_mw": 12059
+              }
+            },
+            {
+              "ms": 3.4518721103668213,
+              "tera_ops_per_s": 119.44731648015319,
+              "before": {
+                "sm_mhz": 975,
+                "temperature_c": 58,
+                "power_mw": 12059
+              },
+              "after": {
+                "sm_mhz": 975,
+                "temperature_c": 58,
+                "power_mw": 12059
+              }
+            },
+            {
+              "ms": 3.4510719776153564,
+              "tera_ops_per_s": 119.47501039978462,
+              "before": {
+                "sm_mhz": 975,
+                "temperature_c": 58,
+                "power_mw": 12059
+              },
+              "after": {
+                "sm_mhz": 975,
+                "temperature_c": 58,
+                "power_mw": 12059
+              }
+            }
+          ],
+          "numeric_checks": [
+            {
+              "iterations": 16,
+              "expected": 16384,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 1048576,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 1048576,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 1048576,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 1048576,
+              "cells_checked": 196608,
+              "mismatches": 0
+            },
+            {
+              "iterations": 1024,
+              "expected": 1048576,
+              "cells_checked": 196608,
+              "mismatches": 0
+            }
+          ],
+          "median_tera_ops_per_s": 113.71873800169327,
+          "min_tera_ops_per_s": 90.54044503751548,
+          "max_tera_ops_per_s": 119.47501039978462
+        }
+      },
+      "before": {
+        "sm_mhz": 975,
+        "temperature_c": 56,
+        "power_mw": 12059
+      },
+      "after": {
+        "sm_mhz": 975,
+        "temperature_c": 58,
+        "power_mw": 12059
+      },
+      "cleanup_errors": [],
+      "wall_seconds": 0.6536367300000165
+    },
+    "comparisons": [
+      {
+        "mode": "fp16_fp16",
+        "stock_best": 59.38563895709969,
+        "unlocked_best": 59.3768796031037,
+        "best_ratio": 0.9998525004672879,
+        "stock_median": 59.36921932590117,
+        "unlocked_median": 59.26163429837982,
+        "median_ratio": 0.9981878652146194,
+        "numeric_mismatches": 0
+      },
+      {
+        "mode": "fp16_fp32",
+        "stock_best": 30.244117987027643,
+        "unlocked_best": 57.05020109330969,
+        "best_ratio": 1.886323850402242,
+        "stock_median": 27.025290094482134,
+        "unlocked_median": 54.386411173609105,
+        "median_ratio": 2.0124265450424677,
+        "numeric_mismatches": 0
+      },
+      {
+        "mode": "bf16_fp32",
+        "stock_best": 30.23007002509521,
+        "unlocked_best": 59.65563906492605,
+        "best_ratio": 1.973387392599603,
+        "stock_median": 26.91925580102793,
+        "unlocked_median": 59.55747306593854,
+        "median_ratio": 2.212448720951056,
+        "numeric_mismatches": 0
+      },
+      {
+        "mode": "tf32_fp32",
+        "stock_best": 15.111773190966314,
+        "unlocked_best": 29.826714512300626,
+        "best_ratio": 1.9737402179997496,
+        "stock_median": 13.437898283921216,
+        "unlocked_median": 29.81484225642418,
+        "median_ratio": 2.2187131965493734,
+        "numeric_mismatches": 0
+      },
+      {
+        "mode": "int8_int32",
+        "stock_best": 119.45950319355887,
+        "unlocked_best": 119.47501039978462,
+        "best_ratio": 1.000129811407307,
+        "stock_median": 119.43846472621973,
+        "unlocked_median": 113.71873800169327,
+        "median_ratio": 0.9521115183652319,
+        "numeric_mismatches": 0
+      }
+    ]
+  },
+  "scope_limits": [
+    "Best-of-five throughput is reported separately from medians.",
+    "Identical PTX and dimensions; clocks not locked and desktop active.",
+    "Kernel version changed; NVIDIA version unchanged.",
+    "NVML telemetry may be cached; no precise power/temperature efficiency conclusion.",
+    "No LLM tokens/s, game FPS, Windows, suspend/resume, sustained-load, second-board or proposed-upstream-module physical validation."
+  ],
+  "post_benchmark_driver_log_check": {
+    "matched_entries": 0,
+    "since_epoch": 1792893856,
+    "pattern": "NVRM|Xid|nvidia|GPU|gpu_unlock",
+    "scope": "One read-only query immediately after the bounded probe; not continuous monitoring."
+  }
+}

@@ -6,13 +6,20 @@ This Linux kernel module combines the CMP unlocker's V67/PLM technique with the 
 
 The benefit of this early kmod driver is that it does not require manual patching each time nvidia releases a new driver version.
 
-The effect of this unlock is that it doubles the instruction issuing speed of FP/BF16 FMA into FP32 operations on GA102, GA103, GA104, GA106 and AD103 cards.
+The effect of this unlock is that it doubles the instruction issuing speed of FP/BF16 FMA into FP32 operations on supported GA102, GA103, GA104, GA106, AD103 and AD106 cards. The narrowly gated AD107M experiment below uses the same Ada mechanism.
 
 AD103 (RTX 4080 SUPER) uses the AD10x payload chain published by
 [TOTORONG/AD103_win_unlocker](https://huggingface.co/TOTORONG/AD103_win_unlocker),
 which performs the four PLM writes in one Booter launch; the GA102 Booter
 halts on Ada without opening FEAT permissions. Boot log and before/after
 benchmarks for a 4080 SUPER are in `docs/evidence/rtx4080super/`.
+
+RTX 4060 Laptop (AD107M) support is **experimental, startup-only and disabled
+by default**. It is limited to `10de:28a0`, subsystem `1d05:1274`, revision
+`a1` and `PMC_BOOT_0=0x197000a1`, with one explicit full PCI target and
+`gpu_unlock.ad107_experimental=1`. One startup of a guarded local fork was
+observed; this proposed upstream module has host-test/build evidence, not a
+physical startup test. See [the exact board, provenance and measurements](docs/evidence/rtx4060-laptop/).
 
 [3090 Ti dense 8192³ GEMM at 450 W, five-sample medians with FP32 accumulation](https://github.com/Zagitta/gpu-unlock/issues/1#issue-5905622687):
 
@@ -25,9 +32,9 @@ benchmarks for a 4080 SUPER are in `docs/evidence/rtx4080super/`.
 
 ## Tested cards
 
-Results reported by users. The module accepts every GeForce ID listed in
-`kernel/gpu_unlock/main.c`, but the cards below are the ones someone has
-reported on. Please add yours with a
+Results reported by users. The module matches the GeForce IDs listed in
+`kernel/gpu_unlock/main.c`; experimental AD107 additionally requires the
+board and opt-in gates below. The cards here have reports. Please add yours with a
 [compatibility report](https://github.com/Zagitta/gpu-unlock/issues/new?template=compatibility-report.yml),
 whether it worked or not.
 
@@ -42,10 +49,13 @@ whether it worked or not.
 | GA104 | RTX 3070 Ti                       | `10de:2482` | Not tested with this module (the same unlock worked from a UEFI port on Windows) | — | [#32](https://github.com/Zagitta/gpu-unlock/issues/32) |
 | GA106 | RTX 3060 12 GB                    | `10de:2504` | Unlocked                            | about +80%     | [#13](https://github.com/Zagitta/gpu-unlock/pull/13), [#31](https://github.com/Zagitta/gpu-unlock/issues/31) |
 | GA103 | any                               | `10de:2414` | No reports yet                      | —              | — |
+| AD107M | RTX 4060 Laptop (`1d05:1274`, rev `a1` only) | `10de:28a0` | Local-fork startup unlocked; proposed module host-tested only | — (not GEMM) | [evidence](docs/evidence/rtx4060-laptop/) |
 
-The gains are dense GEMM throughput from each report's own benchmark, so
-they are not directly comparable. The power limit matters a lot: the lowest
-figure (+25%) is from cards capped at 225 W.
+Except where noted, the gains are dense GEMM throughput from each report's
+own benchmark, so they are not directly comparable. The power limit matters
+a lot: the lowest figure (+25%) is from cards capped at 225 W. The AD107
+report instead measures bounded register-resident instruction throughput;
+it does not establish a dense GEMM or application gain.
 
 Matrix-heavy work speeds up: LLM prefill (+14–36% in
 [#9](https://github.com/Zagitta/gpu-unlock/issues/9),
@@ -145,20 +155,37 @@ There is no `softdep nvidia pre:` rule: kmod honours only the first
 The module does nothing unless the kernel command line opts in:
 
 ```
-gpu_unlock.targets=all                          # every unbound GA102/GA103/GA104/GA106/AD103 card
+gpu_unlock.targets=all                          # every supported non-experimental unbound card
 gpu_unlock.targets=0000:21:00.0                 # only these cards
 gpu_unlock.targets=0000:21:00.0,0000:22:00.0    # comma-separated
 ```
 
 Addresses are full PCI names as `lspci -D` prints them (hex digits in either
-case), independent of GPU numbering and display role. An entry that is not
-a GA102/GA103/GA104/GA106/AD103 card, including `all` mixed with addresses, is logged and ignored.
+case), independent of GPU numbering and display role. An explicit entry for
+an unsupported card, including `all` mixed with addresses, is logged and ignored.
 The cards are unlocked concurrently, about a second in all however many
 there are, and each on its own: a card that is already bound or powered
 down is skipped. Bus mastering that the board firmware left on (Supermicro
 X11 does this whatever its option ROM and bus master settings) is cleared
 first; a card some driver already initialised is still refused. Then
 `nvidia` loads and binds every card as usual.
+
+**Experimental AD107M opt-in:** for the exact `10de:28a0`, subsystem
+`1d05:1274`, revision `a1` board, use both options and the board's actual
+full PCI address:
+
+```text
+gpu_unlock.targets=0000:01:00.0 gpu_unlock.ad107_experimental=1
+```
+
+The extra parameter defaults to off and is read-only after module load.
+AD107 is never selected by `targets=all`, any comma list, a short BDF, or
+opt-in without a target. The chip word must also match `0x197000a1` before
+layout, coherent DMA, BAR writes or firmware start. No sibling AD107 ID or
+other subsystem/revision is enabled. This is the cold, unbound startup path
+only; the historical record is one experimental startup of a local fork,
+not independent confirmation of physical power removal or a physical boot
+of this proposed module. Do not reload, reset or unbind a live GPU to try it.
 
 The display card works too. Its firmware framebuffer (the boot console and
 Plymouth) keeps running while the unlock's firmware steps run, and is
@@ -169,9 +196,9 @@ over.
 Loading the module by hand after boot does nothing to a card that `nvidia`
 has bound.
 
-Suspend to RAM powers the cards off, which resets the speed selectors. After
-resume the module unlocks every card it unlocked at boot again, before
-`nvidia` resumes it: its suspend notifier runs just ahead of the one `nvidia`
+Suspend to RAM powers the cards off, which resets the speed selectors. For
+resume-validated cards (not AD107), the module unlocks those it unlocked at
+boot again before `nvidia` resumes them: its suspend notifier runs just ahead of the one `nvidia`
 resumes its cards from (`NVreg_UseKernelSuspendNotifiers=1`, the default in
 current drivers; `nvidia-resume.service` runs later still). This adds about a
 second to resume. A card that kept power, as in suspend to idle, is still
@@ -180,6 +207,12 @@ bound to another driver, is left as it is, and the log says why. Add
 `gpu_unlock.resume=0` to the kernel command line, or write `0` to
 `/sys/module/gpu_unlock/parameters/resume`, to turn this off. Hibernation is
 not covered.
+
+AD107 is deliberately excluded from this resume mechanism, even with
+`gpu_unlock.resume=1`; it is not retained for the PM callback and direct
+resume transactions are rejected. Startup-only support does not establish
+suspend/resume, hibernation or long-term stability. Existing supported
+Ampere/Ada cards keep their previous resume behavior.
 
 Check the result with:
 
@@ -190,7 +223,9 @@ lspci -nnk -s 0000:21:00.0
 
 To stop unlocking, remove `gpu_unlock.targets=` from the kernel command line;
 for a one-off boot, delete it in the bootloader's edit screen. Removing the
-packages also removes the module and the initramfs drop-ins.
+packages also removes the module and the initramfs drop-ins. Setting
+`gpu_unlock.ad107_experimental=0` on the next boot disables only the AD107
+experiment while leaving other selected cards unchanged.
 
 If the firmware on a card never stops, the module logs it and keeps the DMA
 buffers that firmware may still use until the next power off. Power off

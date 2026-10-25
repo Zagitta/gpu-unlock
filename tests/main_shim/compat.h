@@ -13,7 +13,23 @@
 
 #define __init
 #define __exit
-#define module_param(name, type, perm)
+/* Retain registered bool parameters so tests can exercise opt-in behavior
+ * without referring to a production variable that does not exist yet. */
+struct test_bool_parameter {
+	const char *name;
+	bool *value;
+	struct test_bool_parameter *next;
+};
+static struct test_bool_parameter *test_bool_parameters;
+#define test_module_param_bool(param)						\
+	static struct test_bool_parameter test_parameter_##param = { #param, &param, NULL }; \
+	static void __attribute__((constructor)) test_register_##param(void)	\
+	{										\
+		test_parameter_##param.next = test_bool_parameters;			\
+		test_bool_parameters = &test_parameter_##param;				\
+	}
+#define test_module_param_charp(param)
+#define module_param(name, type, perm) test_module_param_##type(name)
 #define MODULE_PARM_DESC(name, desc)
 #define MODULE_LICENSE(x)
 #define MODULE_DESCRIPTION(x)
@@ -31,6 +47,8 @@ struct pci_driver {
 struct pci_dev {
 	const char *name;
 	unsigned short vendor, device;
+	unsigned short subsystem_vendor, subsystem_device;
+	unsigned char revision;
 	struct pci_driver *driver;
 	int refs;
 	pthread_mutex_t lock;
