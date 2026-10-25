@@ -42,8 +42,8 @@ class PackageTests(unittest.TestCase):
             # initramfs instead: gpu_unlock goes right before nvidia.
             self.assertFalse(any("modprobe.d" in path for path in paths))
             dropin = root / "etc/mkinitcpio.conf.d/zz-gpu-unlock.conf"
-            for before, after in (("zfs nvidia nvidia_drm", "zfs gpu_unlock? nvidia nvidia_drm"),
-                                  ("zfs", "zfs gpu_unlock?")):
+            for before, after in (("zfs nvidia nvidia_drm", "zfs gpu_unlock nvidia nvidia_drm"),
+                                  ("zfs", "zfs gpu_unlock")):
                 result = subprocess.run(["bash", "-c", f"MODULES=({before}); . {dropin}; echo ${{MODULES[*]}}"],
                                         capture_output=True, text=True, check=True)
                 self.assertEqual(result.stdout.strip(), after)
