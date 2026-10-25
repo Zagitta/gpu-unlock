@@ -15,6 +15,11 @@ int gpu_unlock_gfw_assess(const struct gpu_unlock_gfw_sample *sample)
 	if (sample->plm == (u32)~0U || sample->boot == (u32)~0U ||
 	    sample->cpuctl == (u32)~0U)
 		return -ENODEV;
+	/* So can a PRI error. Poll on, as after FLR. */
+	if ((sample->plm & 0xffff0000u) == 0xbadf0000u ||
+	    (sample->boot & 0xffff0000u) == 0xbadf0000u ||
+	    (sample->cpuctl & 0xffff0000u) == 0xbadf0000u)
+		return -EAGAIN;
 	if (!(sample->cpuctl & GU_GFW_CPUCTL_HALTED))
 		return -EAGAIN;
 	if (!(sample->plm & GU_GFW_PLM_LEVEL0))
