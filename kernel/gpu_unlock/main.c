@@ -36,6 +36,10 @@ static const unsigned short supported_ids[] = {
 	/* GA106 (validated only on RTX 3060 12GB 0x2504) */
 	0x2501, 0x2503, 0x2504, 0x2505, 0x2507, 0x2508, 0x2509, 0x252f,
 	0x2544,
+	/* AD103 (validated only on RTX 4080 SUPER 0x2702) */
+	0x2702,
+	/* AD106 (validated only on RTX 4060 Ti 8GB 0x2803) */
+	0x2803,
 };
 
 /* A target card. Those unlocked at boot stay listed, with a reference, to be
@@ -225,4 +229,4 @@ module_init(gpu_unlock_init);
 module_exit(gpu_unlock_exit);
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("Ampere pre-driver BF16 unlock");
-MODULE_VERSION("1.0.0");
+MODULE_VERSION("1.1.0");

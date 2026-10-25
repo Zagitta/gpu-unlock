@@ -15,6 +15,7 @@ from pathlib import Path
 PACKAGE_SHA256 = "e17e7c92eeffa178b0fe1f40eb17a47095f8fc3ce4a77bf115cf5bd5a4df86e9"
 GSP_SHA256 = "572373620a37418f24dc16b5031c39338778c3257e48e8408de9a57291b24f3a"
 PAYLOAD_SHA256 = "2a0aa1f86d0b6afff5214d641d87d46dc98ef06ed908ff05d0ddbad5ffb7e197"
+AD10X_PAYLOAD_SHA256 = "44c36b2d6b3424e53e18f3e55db85c833655de071ce66ce42749588a4a7dc8cb"
 PACKAGE_VERSION = "610.43.03-1"
 FIRMWARE_PREFIX = "usr/lib/firmware/nvidia/610.43.03/"
 MANIFEST = Path(__file__).with_name("artifacts-610.43.03.json")
@@ -93,6 +94,47 @@ def build_payload() -> bytes:
     return bytes(payload)
 
 
+# AD10x four-write chain: WPR_CFG, FBPA, WPR and FEAT PLMs in one launch, with
+# an explicit SEC2 mailbox marker. Derived from TOTORONG/AD103_win_unlocker
+# (GPL-2.0-only), source/firmware-tools/ad102_payload.py, revision
+# 51df9c17ec89eb8486df52cc9079dde4bd1f9974; see NOTICE.md.
+AD10X_PATCHED_WORDS = {
+    0x1100: 0x00000007,
+    0xF948: 0xFFFFF0FF,
+    0xF950: 0x000021B2,
+    0xF960: 0x001FA7CC,
+    0xF968: 0x000033FC,
+    0xF974: 0xFFFFFFFF,
+    0xF97C: 0x0000256F,
+    0xF980: 0x00007A02,
+    0xF984: 0x009A0148,
+    0xF98C: 0x000033FC,
+    0xF998: 0xFFFFFFFF,
+    0xF9A0: 0x0000256F,
+    0xF9A4: 0x00007A02,
+    0xF9A8: 0x001FA7C4,
+    0xF9B0: 0x000033FC,
+    0xF9BC: 0xFFFFFFFF,
+    0xF9C4: 0x0000256F,
+    0xF9C8: 0x00007A02,
+    0xF9CC: 0x00823804,
+    0xF9D4: 0x000033FC,
+    0xF9E0: 0x67B00001,
+    0xF9E8: 0x0000256F,
+    0xF9EC: 0x00007A02,
+    0xF9F8: 0x000031B5,
+    0xF9FC: 0x0000771E,
+}
+AD10X_PAYLOAD_NAME = "v67-ad102-610.43.03-four-plm.bin"
+
+
+def build_ad10x_payload() -> bytes:
+    payload = bytearray(FILL_DWORD.to_bytes(4, "little") * (PAYLOAD_SIZE // 4))
+    for offset, value in AD10X_PATCHED_WORDS.items():
+        payload[offset : offset + 4] = value.to_bytes(4, "little")
+    return bytes(payload)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("package", type=Path, help="pinned nvidia-utils-610.43.03 package")
@@ -117,6 +159,9 @@ def main() -> int:
     payload = build_payload()
     if sha256(payload) != PAYLOAD_SHA256:
         raise SystemExit("generated V67 image differs from its pinned SHA-256")
+    ad10x_payload = build_ad10x_payload()
+    if sha256(ad10x_payload) != AD10X_PAYLOAD_SHA256:
+        raise SystemExit("generated AD10x V67 image differs from its pinned SHA-256")
     manifest = json.loads(MANIFEST.read_text())
     notice = manifest["source_artifacts"][2]["notice"]
     license_text = extract_member(args.package, notice["path"])
@@ -125,6 +170,7 @@ def main() -> int:
     args.output.mkdir(parents=True, exist_ok=True)
     (args.output / "gsp_ga10x.bin").write_bytes(gsp)
     (args.output / "v67-ga102-610.43.03.bin").write_bytes(payload)
+    (args.output / AD10X_PAYLOAD_NAME).write_bytes(ad10x_payload)
     (args.output / "NVIDIA-LICENSE").write_bytes(license_text)
     return 0
 

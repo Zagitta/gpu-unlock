@@ -98,6 +98,8 @@ def build_bundle(source_text: str) -> bytes:
 PINNED = {
     'g_bindata_kgspGetBinArchiveBooterLoadUcode_GA102.c': '04cd3db7f670adc4efd79d2e76217bb809fffddfbd6f1af884cde2af26dd39af',
     'g_bindata_kgspGetBinArchiveGspRmBoot_GA102.c': '35e5aa9075ad3898b6022ffd5820c953d809caa7dabd530cfc1a83dc2a67c5bd',
+    'g_bindata_kgspGetBinArchiveBooterLoadUcode_AD102.c': '0504f640bc36d03c3b617b1d80cf6eee1c8022cdfffb52ed22405aaa316a1460',
+    'g_bindata_kgspGetBinArchiveGspRmBoot_AD102.c': 'da110719ed6b680f26f3f7158f6731d1ff20fa859857238e23ac4935bd4cd91c',
 }
 
 
@@ -121,6 +123,18 @@ def extract_assets(source_root: Path, output: Path) -> None:
         if not fields[index+1] or fields[index]+fields[index+1] > len(image):
             raise ValueError('bootloader descriptor range outside image')
     blobs = {'booter_load_ga102.bin': booter, 'gsp_boot_ga102.bin': image, 'gsp_boot_desc_ga102.bin': desc}
+    # 610.43.03 routes AD102/AD103/AD104/AD106/AD107 through the same AD102
+    # Booter archive; one asset set covers the family.
+    ad10x_boot = inputs['g_bindata_kgspGetBinArchiveGspRmBoot_AD102.c']
+    ad10x_image = _array_bytes(ad10x_boot, 'UCODE_IMAGE_PROD')[0]
+    ad10x_desc = _array_bytes(ad10x_boot, 'UCODE_DESC_PROD')[0]
+    ad10x_fields = struct.unpack('<21I', ad10x_desc)
+    if (len(ad10x_desc) != 84 or ad10x_fields[0] != 5 or ad10x_fields[14] != 1 or
+            ad10x_fields[19] != len(ad10x_image) or ad10x_fields[20] != 0):
+        raise ValueError('unsupported AD10x bootloader descriptor')
+    blobs['booter_load_ad102.bin'] = build_bundle(inputs['g_bindata_kgspGetBinArchiveBooterLoadUcode_AD102.c'])
+    blobs['gsp_boot_ad102.bin'] = ad10x_image
+    blobs['gsp_boot_desc_ad102.bin'] = ad10x_desc
     pinned = json.loads(MANIFEST.read_text())['derived_assets']
     for name, data in blobs.items():
         if hashlib.sha256(data).hexdigest() != pinned[name]:
