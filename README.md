@@ -80,7 +80,7 @@ in `/etc/default/grub`, then run `sudo update-grub`.
 (`bootctl status` shows its location).
 - **UKI / generated entries:** add it to `/etc/kernel/cmdline` and regenerate
 your boot images/entries (e.g. `sudo mkinitcpio -P` for mkinitcpio UKIs).
-
+**Limine:** add it inside `/boot/limine.conf`
 
 
 ## Local build
