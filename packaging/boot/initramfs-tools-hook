@@ -1,0 +1,67 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+# Load nvidia from the initramfs right after gpu_unlock. On a display card
+# gpu_unlock removes the firmware framebuffer before its reset, and nothing
+# shows again until nvidia-drm loads. From the root filesystem that is too
+# late for anything the initramfs asks on screen, such as a LUKS passphrase.
+
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case "$1" in
+prereqs)
+	prereqs
+	exit 0
+	;;
+esac
+
+. /usr/share/initramfs-tools/hook-functions
+
+# The installed name of a module, which may differ from the alias asked for.
+module_name()
+{
+	file=$(modinfo -k "${version}" -F filename "$1" 2>/dev/null) || return 1
+	case "${file}" in
+	/*) ;;
+	*) return 1 ;;
+	esac
+	file=$(basename "${file}")
+	echo "${file%%.ko*}"
+}
+
+# Leave images alone for kernels without both modules.
+modinfo -k "${version}" gpu_unlock >/dev/null 2>&1 || exit 0
+module_name nvidia >/dev/null || exit 0
+
+# nvidia_drm pulls in nvidia_modeset, nvidia and their firmware.
+manual_add_modules nvidia_drm
+
+# udev's coldplug in init-top runs before /conf/modules is read and would
+# load nvidia or nvidia_drm by their PCI aliases, binding the card before
+# gpu_unlock sees it. The blacklist stops only those alias loads, and only
+# inside the initramfs; the modprobe from /conf/modules still loads them.
+mkdir -p "${DESTDIR}/etc/modprobe.d"
+for module in nvidia nvidia_modeset nvidia_drm; do
+	name=$(module_name "${module}") && echo "blacklist ${name}"
+done >"${DESTDIR}/etc/modprobe.d/gpu-unlock.conf"
+
+# gpu_unlock, with any options, goes right before the first nvidia module
+# listed (for example in /etc/initramfs-tools/modules, read first), and
+# nvidia_drm follows it unless listed. The list is read twice to find the
+# gpu_unlock line first.
+modules="${DESTDIR}/conf/modules"
+touch "${modules}"
+awk '
+	BEGIN { ours = "gpu_unlock" }
+	$1 == "gpu_unlock" || $1 == "gpu-unlock" { if (NR == FNR) ours = $0; next }
+	NR == FNR { next }
+	$1 ~ /^nvidia/ && !placed { print ours; placed = 1 }
+	$1 ~ /^nvidia[-_]drm$/ { drm = 1 }
+	{ print }
+	END {
+		if (!placed)
+			print ours
+		if (!drm)
+			print "nvidia_drm"
+	}
+' "${modules}" "${modules}" >"${modules}.new"
+mv "${modules}.new" "${modules}"

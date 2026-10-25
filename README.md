@@ -124,7 +124,16 @@ last and still runs before an `nvidia` loaded from the root filesystem.
 Images are rebuilt on install. mkinitcpio ignores drop-ins for an image
 built with `-c <config>` or a preset `_config`; put `gpu_unlock` right
 before `nvidia` in that config's `MODULES` yourself.
-- **initramfs-tools:** `/usr/share/initramfs-tools/modules.d/gpu-unlock.conf`.
+- **initramfs-tools:** `/usr/share/initramfs-tools/modules.d/gpu-unlock.conf`,
+and the hook `/usr/share/initramfs-tools/hooks/gpu-unlock`. For a kernel
+that has an `nvidia` module, the hook also puts `nvidia_drm`, its
+dependencies and their firmware in the image and loads them right after
+`gpu_unlock`, so a display card shows the initramfs's own prompts, such
+as a LUKS passphrase. This adds about 90 MB to each image, most of it
+the driver's GSP firmware; check the free space on `/boot`. udev would otherwise load `nvidia` first, by its PCI ID, so
+the hook blacklists it inside the image only; the root filesystem is
+not affected. If `/etc/initramfs-tools/modules` lists `nvidia` modules,
+`gpu_unlock` still goes right before the first of them.
 - **dracut:** `/usr/lib/dracut/dracut.conf.d/gpu-unlock.conf`.
 
 With initramfs-tools and dracut, the module is built for every installed
@@ -158,7 +167,12 @@ The display card works too. Its firmware framebuffer (the boot console and
 Plymouth) keeps running while the unlock's firmware steps run, and is
 removed just before the card's reset, as `nvidia-drm` would do a moment
 later anyway. Its screen is blank from that reset until `nvidia-drm` takes
-over.
+over. When `nvidia-drm` is not in the initramfs, that is only after the
+root filesystem is mounted, so a prompt before then, such as a LUKS
+passphrase, is not shown. initramfs-tools adds `nvidia-drm` to the image
+for this. With mkinitcpio, list `nvidia nvidia_modeset nvidia_drm` in
+`MODULES` (the drop-in puts `gpu_unlock` before them). With dracut, the
+prompt stays blank: type the passphrase anyway.
 
 Loading the module by hand after boot does nothing to a card that `nvidia`
 has bound.

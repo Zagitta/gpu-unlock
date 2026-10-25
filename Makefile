@@ -82,6 +82,8 @@ install-mkinitcpio:
 install-initramfs-tools:
 	install -Dm644 packaging/boot/initramfs-tools.conf \
 		$(DESTDIR)/usr/share/initramfs-tools/modules.d/gpu-unlock.conf
+	install -Dm755 packaging/boot/initramfs-tools-hook \
+		$(DESTDIR)/usr/share/initramfs-tools/hooks/gpu-unlock
 
 install-dracut:
 	install -Dm644 packaging/boot/dracut.conf $(DESTDIR)/usr/lib/dracut/dracut.conf.d/gpu-unlock.conf

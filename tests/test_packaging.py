@@ -47,6 +47,40 @@ class PackageTests(unittest.TestCase):
                 result = subprocess.run(["bash", "-c", f"MODULES=({before}); . {dropin}; echo ${{MODULES[*]}}"],
                                         capture_output=True, text=True, check=True)
                 self.assertEqual(result.stdout.strip(), after)
+            hook = root / "usr/share/initramfs-tools/hooks/gpu-unlock"
+            self.assertTrue(hook.stat().st_mode & 0o111)
+
+    def test_initramfs_tools_hook_loads_nvidia_after_unlock(self):
+        hook = (ROOT / "packaging/boot/initramfs-tools-hook").read_text()
+        functions = ". /usr/share/initramfs-tools/hook-functions"
+        self.assertIn(functions, hook)
+        stub = 'manual_add_modules() { echo "$@" >"$DESTDIR/added"; }'
+        for before, after in (
+                ("gpu_unlock\n", "gpu_unlock\nnvidia_drm\n"),
+                ("zfs\ngpu_unlock\n", "zfs\ngpu_unlock\nnvidia_drm\n"),
+                # From /etc/initramfs-tools/modules, which is read first.
+                ("nvidia\nnvidia-drm modeset=1\nzfs\ngpu_unlock targets=all\n",
+                 "gpu_unlock targets=all\nnvidia\nnvidia-drm modeset=1\nzfs\n")):
+            with tempfile.TemporaryDirectory() as directory:
+                destdir = Path(directory) / "root"
+                (destdir / "conf").mkdir(parents=True)
+                (destdir / "conf/modules").write_text(before)
+                bindir = Path(directory) / "bin"
+                bindir.mkdir()
+                modinfo = bindir / "modinfo"
+                modinfo.write_text('#!/bin/sh\n[ "$4" = filename ] && '
+                                   'echo "/lib/modules/6.0/kernel/$5.ko.zst"\nexit 0\n')
+                modinfo.chmod(0o755)
+                script = Path(directory) / "hook"
+                script.write_text(hook.replace(functions, stub))
+                subprocess.run(["sh", str(script)], check=True,
+                               env={"PATH": f"{bindir}:/usr/bin:/bin",
+                                    "DESTDIR": str(destdir), "version": "6.0"})
+                self.assertEqual((destdir / "conf/modules").read_text(), after)
+                self.assertEqual((destdir / "added").read_text(), "nvidia_drm\n")
+                self.assertEqual((destdir / "etc/modprobe.d/gpu-unlock.conf").read_text(),
+                                 "blacklist nvidia\nblacklist nvidia_modeset\n"
+                                 "blacklist nvidia_drm\n")
 
     def test_pkgbuild_pins_match_manifest(self):
         manifest = json.loads((ROOT / "firmware/artifacts-610.43.03.json").read_text())
