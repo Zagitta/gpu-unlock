@@ -6,7 +6,7 @@ This Linux kernel module combines the CMP unlocker's V67/PLM technique with the 
 
 The benefit of this early kmod driver is that it does not require manual patching each time nvidia releases a new driver version.
 
-The effect of this unlock is that it doubles the instruction issuing speed of FP/BF16 FMA into FP32 operations on GA102, GA103, GA104 and GA106 cards.
+The effect of this unlock is that it doubles the instruction issuing speed of FP/BF16 FMA into FP32 operations on supported GA102, GA103, GA104, GA106 and GA107 cards.
 
 [3090 Ti dense 8192³ GEMM at 450 W, five-sample medians with FP32 accumulation](https://github.com/Zagitta/gpu-unlock/issues/1#issue-5905622687):
 
@@ -36,6 +36,7 @@ whether it worked or not.
 | GA104 | RTX 3070 Ti                       | `10de:2482` | Not tested with this module (the same unlock worked from a UEFI port on Windows) | — | [#32](https://github.com/Zagitta/gpu-unlock/issues/32) |
 | GA106 | RTX 3060 12 GB                    | `10de:2504` | Unlocked                            | about +80%     | [#13](https://github.com/Zagitta/gpu-unlock/pull/13), [#31](https://github.com/Zagitta/gpu-unlock/issues/31) |
 | GA103 | any                               | `10de:2414` | No reports yet                      | —              | — |
+| GA107 | RTX 3050 Laptop 4 GB (ASUS FX507ZC) | `10de:25a2` | Unlocked                            | about +55%     | [#95](https://github.com/Zagitta/gpu-unlock/issues/95) |
 
 The gains are dense GEMM throughput from each report's own benchmark, so
 they are not directly comparable. The power limit matters a lot: the lowest
@@ -139,14 +140,14 @@ There is no `softdep nvidia pre:` rule: kmod honours only the first
 The module does nothing unless the kernel command line opts in:
 
 ```
-gpu_unlock.targets=all                          # every unbound GA102/GA103/GA104/GA106 card
+gpu_unlock.targets=all                          # every unbound supported card
 gpu_unlock.targets=0000:21:00.0                 # only these cards
 gpu_unlock.targets=0000:21:00.0,0000:22:00.0    # comma-separated
 ```
 
 Addresses are full PCI names as `lspci -D` prints them (hex digits in either
 case), independent of GPU numbering and display role. An entry that is not
-a GA102/GA103/GA104/GA106 card, including `all` mixed with addresses, is logged and ignored.
+a supported card, including `all` mixed with addresses, is logged and ignored.
 The cards are unlocked concurrently, about a second in all however many
 there are, and each on its own: a card that is already bound or powered
 down is skipped. Bus mastering that the board firmware left on (Supermicro
