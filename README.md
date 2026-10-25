@@ -28,7 +28,7 @@ whether it worked or not.
 | Chip  | Card                              | PCI ID      | Result                              | BF16 GEMM gain | Reports |
 | ----- | --------------------------------- | ----------- | ----------------------------------- | -------------- | ------- |
 | GA102 | RTX 3090 Ti                       | `10de:2203` | Unlocked                            | +68–80%        | [#1](https://github.com/Zagitta/gpu-unlock/issues/1) |
-| GA102 | RTX 3090                          | `10de:2204` | Unlocked                            | +25–67%        | [#5](https://github.com/Zagitta/gpu-unlock/issues/5), [#9](https://github.com/Zagitta/gpu-unlock/issues/9), [#10](https://github.com/Zagitta/gpu-unlock/issues/10), [#17](https://github.com/Zagitta/gpu-unlock/issues/17), [#25](https://github.com/Zagitta/gpu-unlock/issues/25), [#27](https://github.com/Zagitta/gpu-unlock/issues/27), [#33](https://github.com/Zagitta/gpu-unlock/issues/33) |
+| GA102 | RTX 3090                          | `10de:2204` | Unlocked                            | +25–67%        | [#5](https://github.com/Zagitta/gpu-unlock/issues/5), [#9](https://github.com/Zagitta/gpu-unlock/issues/9), [#10](https://github.com/Zagitta/gpu-unlock/issues/10), [#17](https://github.com/Zagitta/gpu-unlock/issues/17), [#25](https://github.com/Zagitta/gpu-unlock/issues/25), [#27](https://github.com/Zagitta/gpu-unlock/issues/27), [#33](https://github.com/Zagitta/gpu-unlock/issues/33), [#107](https://github.com/Zagitta/gpu-unlock/issues/107) |
 | GA102 | RTX 3080 Ti 20 GB (OEM, GA102-250) | `10de:2205` | Unlock completes, BF16 stays at half rate | —        | [#28](https://github.com/Zagitta/gpu-unlock/issues/28) |
 | GA102 | RTX 3080 10 GB                    | `10de:2206` | Unlocked                            | +70–73%        | [#14](https://github.com/Zagitta/gpu-unlock/issues/14) |
 | GA102 | RTX 3080 20 GB (memory upgrade)   | `10de:2206` | Unlocked                            | +56–59%        | [#10](https://github.com/Zagitta/gpu-unlock/issues/10), [#15](https://github.com/Zagitta/gpu-unlock/issues/15) |
@@ -41,13 +41,17 @@ The gains are dense GEMM throughput from each report's own benchmark, so
 they are not directly comparable. The power limit matters a lot: the lowest
 figure (+25%) is from cards capped at 225 W.
 
-Matrix-heavy work speeds up: LLM prefill (+14–36% in
+Matrix-heavy work speeds up: LLM prefill (+14–50% in
 [#9](https://github.com/Zagitta/gpu-unlock/issues/9),
 [#15](https://github.com/Zagitta/gpu-unlock/issues/15),
-[#25](https://github.com/Zagitta/gpu-unlock/issues/25) and
-[#33](https://github.com/Zagitta/gpu-unlock/issues/33)), diffusion and
-FlashAttention. LLM decode, which is limited by memory bandwidth, and INT8
-work stay about the same. The reports that compared outputs found them
+[#25](https://github.com/Zagitta/gpu-unlock/issues/25),
+[#33](https://github.com/Zagitta/gpu-unlock/issues/33) and
+[#107](https://github.com/Zagitta/gpu-unlock/issues/107)), diffusion and
+FlashAttention. In [#107](https://github.com/Zagitta/gpu-unlock/issues/107)
+(vLLM, 4-bit W4A16 model) the prefill gain grows with the power limit, from
+25% at 250 W to 50% at 375 W, and prefill energy per token falls 20–35%.
+LLM decode, which is limited by memory bandwidth, and INT8 work stay about
+the same. The reports that compared outputs found them
 bit-identical before and after.
 
 Reports also cover up to four cards in one machine, the card driving the
