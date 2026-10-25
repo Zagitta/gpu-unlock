@@ -125,15 +125,19 @@ Images are rebuilt on install. mkinitcpio ignores drop-ins for an image
 built with `-c <config>` or a preset `_config`; put `gpu_unlock` right
 before `nvidia` in that config's `MODULES` yourself.
 - **initramfs-tools:** `/usr/share/initramfs-tools/modules.d/gpu-unlock.conf`,
-and the hook `/usr/share/initramfs-tools/hooks/gpu-unlock`. For a kernel
-that has an `nvidia` module, the hook also puts `nvidia_drm`, its
-dependencies and their firmware in the image and loads them right after
-`gpu_unlock`, so a display card shows the initramfs's own prompts, such
-as a LUKS passphrase. This adds about 90 MB to each image, most of it
-the driver's GSP firmware; check the free space on `/boot`. udev would otherwise load `nvidia` first, by its PCI ID, so
+the hook `/usr/share/initramfs-tools/hooks/gpu-unlock` and the script
+`/usr/share/initramfs-tools/scripts/init-premount/gpu-unlock`. For a
+kernel that has an `nvidia` module, the hook also puts `nvidia_drm`, its
+dependencies and their firmware in the image, and the script loads them
+right after `gpu_unlock`, before any LUKS passphrase prompt. A display
+card then shows the initramfs's own prompts. This adds about 90 MB to
+each image, most of it the driver's GSP firmware; check the free space
+on `/boot`. udev would otherwise load `nvidia` first, by its PCI ID, so
 the hook blacklists it inside the image only; the root filesystem is
-not affected. If `/etc/initramfs-tools/modules` lists `nvidia` modules,
-`gpu_unlock` still goes right before the first of them.
+not affected. The initramfs runs every `modprobe` with that blacklist,
+so `nvidia` lines in `/etc/initramfs-tools/modules` are skipped and the
+script loads `nvidia_drm` in their place, with the options from
+`modprobe.d`.
 - **dracut:** `/usr/lib/dracut/dracut.conf.d/gpu-unlock.conf`.
 
 With initramfs-tools and dracut, the module is built for every installed
