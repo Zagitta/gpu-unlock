@@ -15,8 +15,12 @@ MANIFEST = Path(__file__).with_name("artifacts-610.43.03.json")
 
 
 def digest(path: Path) -> str:
+    # hashlib.file_digest needs Python 3.11; Ubuntu 22.04 ships 3.10.
+    hash = hashlib.sha256()
     with path.open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
+        for chunk in iter(lambda: stream.read(1 << 20), b""):
+            hash.update(chunk)
+    return hash.hexdigest()
 
 
 def inputs(manifest: dict) -> list[dict]:
