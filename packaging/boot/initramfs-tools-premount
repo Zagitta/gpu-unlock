@@ -1,0 +1,23 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+# Load nvidia_drm now that gpu_unlock has run from /conf/modules, and
+# before local-top asks for a LUKS passphrase. The gpu-unlock hook puts
+# both in the image and blacklists nvidia there, so that udev's coldplug
+# does not load it first. /init runs every modprobe with -b, which applies
+# that blacklist to /conf/modules as well, so this loads it without -b.
+
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case "$1" in
+prereqs)
+	prereqs
+	exit 0
+	;;
+esac
+
+# The hook leaves this out for kernels without nvidia.
+[ -e /etc/modprobe.d/gpu-unlock.conf ] || exit 0
+# Unset, not empty: kmod 34 aborts on an empty MODPROBE_OPTIONS.
+unset MODPROBE_OPTIONS
+/sbin/modprobe nvidia_drm
+exit 0

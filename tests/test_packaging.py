@@ -47,6 +47,61 @@ class PackageTests(unittest.TestCase):
                 result = subprocess.run(["bash", "-c", f"MODULES=({before}); . {dropin}; echo ${{MODULES[*]}}"],
                                         capture_output=True, text=True, check=True)
                 self.assertEqual(result.stdout.strip(), after)
+            for script in ("hooks/gpu-unlock", "scripts/init-premount/gpu-unlock"):
+                path = root / "usr/share/initramfs-tools" / script
+                self.assertTrue(path.stat().st_mode & 0o111, script)
+
+    def test_initramfs_tools_hook_adds_and_blacklists_nvidia(self):
+        hook = (ROOT / "packaging/boot/initramfs-tools-hook").read_text()
+        functions = ". /usr/share/initramfs-tools/hook-functions"
+        self.assertIn(functions, hook)
+        stub = 'manual_add_modules() { echo "$@" >"$DESTDIR/added"; }'
+        with tempfile.TemporaryDirectory() as directory:
+            destdir = Path(directory) / "root"
+            (destdir / "conf").mkdir(parents=True)
+            (destdir / "conf/modules").write_text("nvidia\ngpu_unlock\n")
+            bindir = Path(directory) / "bin"
+            bindir.mkdir()
+            modinfo = bindir / "modinfo"
+            modinfo.write_text('#!/bin/sh\n[ "$4" = filename ] && '
+                               'echo "/lib/modules/6.0/kernel/$5.ko.zst"\nexit 0\n')
+            modinfo.chmod(0o755)
+            script = Path(directory) / "hook"
+            script.write_text(hook.replace(functions, stub))
+            subprocess.run(["sh", str(script)], check=True,
+                           env={"PATH": f"{bindir}:/usr/bin:/bin",
+                                "DESTDIR": str(destdir), "version": "6.0"})
+            self.assertEqual((destdir / "added").read_text(), "nvidia_drm\n")
+            self.assertEqual((destdir / "etc/modprobe.d/gpu-unlock.conf").read_text(),
+                             "blacklist nvidia\nblacklist nvidia_modeset\n"
+                             "blacklist nvidia_drm\n")
+            self.assertEqual((destdir / "conf/modules").read_text(), "nvidia\ngpu_unlock\n")
+
+    def test_initramfs_tools_premount_loads_nvidia_without_blacklist(self):
+        premount = (ROOT / "packaging/boot/initramfs-tools-premount").read_text()
+        for path in ("/etc/modprobe.d/gpu-unlock.conf", "/sbin/modprobe"):
+            self.assertIn(path, premount)
+        for blacklisted in (True, False):
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                if blacklisted:
+                    (root / "gpu-unlock.conf").write_text("blacklist nvidia\n")
+                modprobe = root / "modprobe"
+                # /init exports MODPROBE_OPTIONS=-qb for every modprobe.
+                # kmod 34 aborts on an empty one, so it has to be unset.
+                modprobe.write_text('#!/bin/sh\necho "[${MODPROBE_OPTIONS-unset}] $*" >>"${0%/*}/log"\n')
+                modprobe.chmod(0o755)
+                script = root / "premount"
+                script.write_text(premount
+                                  .replace("/etc/modprobe.d/gpu-unlock.conf", str(root / "gpu-unlock.conf"))
+                                  .replace("/sbin/modprobe", str(modprobe)))
+                subprocess.run(["sh", str(script)], check=True,
+                               env={"PATH": "/usr/bin:/bin", "MODPROBE_OPTIONS": "-qb"})
+                log = root / "log"
+                if blacklisted:
+                    self.assertEqual(log.read_text(), "[unset] nvidia_drm\n")
+                else:
+                    self.assertFalse(log.exists())
 
     def test_pkgbuild_pins_match_manifest(self):
         manifest = json.loads((ROOT / "firmware/artifacts-610.43.03.json").read_text())

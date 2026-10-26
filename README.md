@@ -126,7 +126,20 @@ last and still runs before an `nvidia` loaded from the root filesystem.
 Images are rebuilt on install. mkinitcpio ignores drop-ins for an image
 built with `-c <config>` or a preset `_config`; put `gpu_unlock` right
 before `nvidia` in that config's `MODULES` yourself.
-- **initramfs-tools:** `/usr/share/initramfs-tools/modules.d/gpu-unlock.conf`.
+- **initramfs-tools:** `/usr/share/initramfs-tools/modules.d/gpu-unlock.conf`,
+the hook `/usr/share/initramfs-tools/hooks/gpu-unlock` and the script
+`/usr/share/initramfs-tools/scripts/init-premount/gpu-unlock`. For a
+kernel that has an `nvidia` module, the hook also puts `nvidia_drm`, its
+dependencies and their firmware in the image, and the script loads them
+right after `gpu_unlock`, before any LUKS passphrase prompt. A display
+card then shows the initramfs's own prompts. This adds about 90 MB to
+each image, most of it the driver's GSP firmware; check the free space
+on `/boot`. udev would otherwise load `nvidia` first, by its PCI ID, so
+the hook blacklists it inside the image only; the root filesystem is
+not affected. The initramfs runs every `modprobe` with that blacklist,
+so `nvidia` lines in `/etc/initramfs-tools/modules` are skipped and the
+script loads `nvidia_drm` in their place, with the options from
+`modprobe.d`.
 - **dracut:** `/usr/lib/dracut/dracut.conf.d/gpu-unlock.conf`.
 
 With initramfs-tools and dracut, the module is built for every installed
@@ -160,7 +173,12 @@ The display card works too. Its firmware framebuffer (the boot console and
 Plymouth) keeps running while the unlock's firmware steps run, and is
 removed just before the card's reset, as `nvidia-drm` would do a moment
 later anyway. Its screen is blank from that reset until `nvidia-drm` takes
-over.
+over. When `nvidia-drm` is not in the initramfs, that is only after the
+root filesystem is mounted, so a prompt before then, such as a LUKS
+passphrase, is not shown. initramfs-tools adds `nvidia-drm` to the image
+for this. With mkinitcpio, list `nvidia nvidia_modeset nvidia_drm` in
+`MODULES` (the drop-in puts `gpu_unlock` before them). With dracut, the
+prompt stays blank: type the passphrase anyway.
 
 Loading the module by hand after boot does nothing to a card that `nvidia`
 has bound.

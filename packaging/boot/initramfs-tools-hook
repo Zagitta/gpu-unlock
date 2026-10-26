@@ -1,0 +1,47 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+# Put nvidia in the image for the gpu-unlock init-premount script, which
+# loads it right after gpu_unlock. On a display card gpu_unlock removes the
+# firmware framebuffer before its reset, and nothing shows again until
+# nvidia-drm loads. From the root filesystem that is too late for anything
+# the initramfs asks on screen, such as a LUKS passphrase.
+
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case "$1" in
+prereqs)
+	prereqs
+	exit 0
+	;;
+esac
+
+. /usr/share/initramfs-tools/hook-functions
+
+# The installed name of a module, which may differ from the alias asked for.
+module_name()
+{
+	file=$(modinfo -k "${version}" -F filename "$1" 2>/dev/null) || return 1
+	case "${file}" in
+	/*) ;;
+	*) return 1 ;;
+	esac
+	file=$(basename "${file}")
+	echo "${file%%.ko*}"
+}
+
+# Leave images alone for kernels without both modules.
+modinfo -k "${version}" gpu_unlock >/dev/null 2>&1 || exit 0
+module_name nvidia >/dev/null || exit 0
+
+# nvidia_drm pulls in nvidia_modeset, nvidia and their firmware.
+manual_add_modules nvidia_drm
+
+# udev's coldplug in init-top runs before /conf/modules is read and would
+# load nvidia or nvidia_drm by their PCI aliases, binding the card before
+# gpu_unlock sees it. The blacklist stops that, and only inside the
+# initramfs. /init runs every modprobe with -b, so it also stops nvidia
+# lines in /conf/modules; the init-premount script loads them instead.
+mkdir -p "${DESTDIR}/etc/modprobe.d"
+for module in nvidia nvidia_modeset nvidia_drm; do
+	name=$(module_name "${module}") && echo "blacklist ${name}"
+done >"${DESTDIR}/etc/modprobe.d/gpu-unlock.conf"
