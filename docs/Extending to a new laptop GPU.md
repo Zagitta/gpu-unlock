@@ -108,6 +108,22 @@ PCI `10de:25ec`, subsystem `17aa:3c90` (Lenovo board `GN20-P0-R-K2`), driver
   unaffected (~510), consistent with only fp16/bf16 going through this
   selector. On this board, the resume path is what makes the unlock usable —
   the boot-time path alone is not enough.
+- **Resume success itself is conditional, not guaranteed.** The resume
+  re-unlock above doesn't win every time — it's a real race against
+  `nvidia`'s own `PM_POST_SUSPEND` resume notifier, and priority ordering
+  alone didn't settle it in practice. Automating `systemctl suspend` (via
+  `rtcwake`, scripted, no real desktop activity beforehand) lost this race
+  consistently — every single attempt, across dozens of trials, whether
+  triggered right at the login screen, after a fixed delay up to ~90 seconds
+  post-login, or immediately following an automated attempt to generate GPU
+  load. Suspending by hand after ~5 minutes of simply being logged in (no
+  deliberate activity) won immediately; suspending after as little as ~60
+  seconds of genuine desktop use (moving windows, video playback) also won
+  immediately. The exact trigger isn't pinned down — accumulated real
+  GPU/display activity and a longer idle threshold than any scripted retry
+  loop was given are both still candidates — but on this board, "retry a
+  plain suspend/resume a few times right after boot" does not reliably work;
+  only a deliberately delayed or human-driven suspend has, so far.
 - **Laptop-specific gotchas hit while measuring this:**
   - Booting with the unlock module active changed which display scale GDM
     picked (100% instead of the usual 125%) — GDM's own `mutter` instance
@@ -128,6 +144,19 @@ PCI `10de:25ec`, subsystem `17aa:3c90` (Lenovo board `GN20-P0-R-K2`), driver
     depends on — and carries at least one documented report of leaving a similar
     laptop with a black screen until a BIOS defaults reset. Not a workaround for
     this.
+  - Baking the cold-boot step into the real default boot (instead of a
+    one-off GRUB test entry) needs whichever initramfs generator the system
+    actually uses for its default images, not just whichever one happens to
+    also be installed: on this Ubuntu install, `/usr/sbin/update-initramfs`
+    is dpkg-diverted to dracut, not `initramfs-tools`, even though
+    `initramfs-tools-core` is also installed and its own `mkinitramfs` works
+    fine when invoked directly (`dpkg -S $(readlink -f $(which
+    update-initramfs))` tells you which one actually owns it). For dracut,
+    `force_drivers+=" <module> "` in `/etc/dracut.conf.d/` plus
+    `install_items+=` for the firmware is the equivalent of
+    initramfs-tools' `modules.d` hook — dracut's own `rd.driver.pre=`
+    mechanism (set automatically by `force_drivers`) loads it ahead of udev
+    on its own, no custom ordering hook needed.
 - **Real-model benchmark** (transformer + CNN train/inference, not just the
   register microbenchmark above): pending.
 - **Prior art.** [`IHaBiS02/ga107-unlock`](https://github.com/IHaBiS02/ga107-unlock)
