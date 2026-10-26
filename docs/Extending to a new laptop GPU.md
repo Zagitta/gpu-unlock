@@ -180,6 +180,34 @@ PCI `10de:25ec`, subsystem `17aa:3c90` (Lenovo board `GN20-P0-R-K2`), driver
   gain than the CNN (cuDNN picks the conv algorithm per layer, not every
   shape is tensor-core shaped) — the same pattern the register microbenchmark
   predicted.
+- **The CNN gap above is mostly a memory-layout artifact, not a ceiling on
+  the unlock itself.** The CNN benchmark ran its tensors in the default NCHW
+  layout; cuDNN's fastest Tensor-Core (HMMA) convolution kernels for fp16/bf16
+  are largely NHWC-only, so under NCHW, `cudnn.benchmark=True`'s algorithm
+  search was picking from a narrower, partly non-Tensor-Core kernel set. This
+  is a cuDNN-algorithm-selection effect, independent of the SS0/SS1 register
+  state the unlock touches — confirmed by converting the CNN model and input
+  to `channels_last` (NHWC) and re-measuring on the **same unmodified, locked
+  (stock) card**, no unlock involved at all:
+
+  | Precision | Train | Inference |
+  | --- | ---: | ---: |
+  | fp32 (control) | -19.4% | -22.8% |
+  | tf32 | +1.0% | -2.7% |
+  | fp16 (amp) | +30.6% | +37.5% |
+  | bf16 (amp) | +29.3% | +34.8% |
+
+  fp16/bf16 jump ~30-38% from the layout change alone, with the card still
+  locked — confirming cuDNN's kernel selection and the register unlock are
+  orthogonal levers. fp32 gets slower (NHWC fp32 conv kernels in cuDNN are
+  less mature than NCHW's, and fp32 gets no Tensor-Core benefit to offset
+  that), which is why fp32 is no longer flat once `channels_last` is in play —
+  expected, since fp32 is the non-Tensor-Core control, not evidence against
+  the unlock. tf32 is roughly flat either way (within run-to-run noise). The
+  CNN rows in the table above predate this change and are stale now that the
+  baseline itself shifts; a full before/after redo with `channels_last`
+  enabled on both sides (needed to isolate the unlock's own effect from the
+  layout effect) is in progress.
 - **Prior art.** [`IHaBiS02/ga107-unlock`](https://github.com/IHaBiS02/ga107-unlock)
   independently targets a different GA107 board (LG, subsystem `1854:052f`) as a
   single-board-hardcoded fork of an earlier version of this module. This entry
