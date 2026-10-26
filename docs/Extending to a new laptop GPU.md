@@ -59,10 +59,55 @@ general procedure, then walks through it for one real board (GA107, Lenovo RTX
    of this module's own log messages (a trivial separate kernel module reading
    SS0/SS1/the PLM register directly is enough), and with a real throughput
    measurement, not just a register value.
-7. **Watch for laptop-specific false signals.** See the gotchas list in the case
+7. **If only the resume path persists, automate the suspend/resume cycle —
+   but trigger it the right way.** The race between this module's resume
+   notifier (priority 1) and `nvidia`'s own `PM_POST_SUSPEND` notifier
+   (priority 0) is not decided by notifier priority alone, and it is not
+   decided by elapsed time or GPU/desktop activity either — both looked like
+   plausible factors under manual testing and both turned out to be
+   confounds. The actual deciding factor is **which code path initiates
+   suspend**:
+   - `rtcwake -m mem` (or anything else that writes directly to
+     `/sys/power/state`) bypasses `systemd-logind` entirely. The running
+     Wayland compositor is never told to prepare for sleep, so it never
+     releases DRM master before the kernel suspends — and the resume
+     notifier then reliably *loses* this race, regardless of how long the
+     system was up or how much GPU/input activity preceded it.
+   - `systemctl suspend` goes through logind's D-Bus `Suspend()` method,
+     which does tell the compositor to run its real pre-suspend handling
+     (releasing DRM master, among other things) first. With that path, the
+     resume notifier reliably *wins* — confirmed even seconds after boot,
+     before any user has logged in (the display manager's own greeter
+     compositor handles this the same way a real user session does).
+
+   This makes full unattended automation straightforward: arm the RTC wake
+   alarm separately from the actual suspend call, since `rtcwake -m mem`
+   both arms the alarm *and* triggers the losing suspend path in one call —
+   use `rtcwake -m no -s N` (arms the alarm only, does not suspend anything)
+   followed by `systemctl suspend` (the winning path). `N` must be a whole
+   number of seconds ≥ 1 — the kernel's RTC alarm interface has no
+   sub-second field, and `rtcwake` itself rejects `0` outright as "no wake
+   time given". A `oneshot` systemd service, gated on
+   `ConditionPathExists=/sys/module/<your_module>` and ordered
+   `After=graphical.target`, needs no session-detection wait at all — firing
+   as soon as the display manager's greeter is up is enough:
+
+   ```sh
+   #!/bin/sh
+   rtcwake -m no -s 1
+   systemctl suspend
+   ```
+
+   Measure the real suspend-entry-to-exit duration with
+   `journalctl -k -b 0 | grep -E 'PM: suspend (entry|exit)'` rather than
+   assuming the alarm value controls it — on real hardware the ACPI S3
+   round trip has its own floor (quiescing devices, the actual sleep/wake
+   transition, PCIe re-link, GPU reinit) that a smaller alarm value won't
+   shrink past.
+8. **Watch for laptop-specific false signals.** See the gotchas list in the case
    study below — they generalize to any laptop/Optimus machine, not just this
    one board.
-8. **Report it either way**, via a
+9. **Report it either way**, via a
    [compatibility report](https://github.com/Zagitta/gpu-unlock/issues/new?template=compatibility-report.yml)
    or a PR adding the ID, noting explicitly whether the boot-time unlock, the
    resume unlock, or both actually persisted.
@@ -108,41 +153,18 @@ PCI `10de:25ec`, subsystem `17aa:3c90` (Lenovo board `GN20-P0-R-K2`), driver
   unaffected (~510), consistent with only fp16/bf16 going through this
   selector. On this board, the resume path is what makes the unlock usable —
   the boot-time path alone is not enough.
-- **Resume success is fully automatable once suspend is triggered the right
-  way — the deciding variable is not time or GPU activity, it's which code
-  path initiates suspend.** The resume re-unlock above doesn't win every
-  time; it's a real race against `nvidia`'s own `PM_POST_SUSPEND` resume
-  notifier, and the module's higher notifier priority alone doesn't settle
-  it. Dozens of scripted trials using `rtcwake -m mem` (writes straight to
-  `/sys/power/state`, bypassing `systemd-logind` entirely) lost this race
-  consistently, regardless of elapsed time (up to ~250s tested) or GPU/input
-  activity injected beforehand (`glxgears` sustained 58s at 144 FPS with PCI
-  runtime-autosuspend forced off; continuous synthetic mouse movement via
-  `ydotool`; an `ffplay` synthetic test-pattern window) — all lost. The one
-  pattern that won, every time it was tried, was `systemctl suspend`: it
-  goes through logind's D-Bus `Suspend()` method, which tells the running
-  Wayland compositor (Mutter — a user's own desktop session, or even GDM's
-  own greeter compositor before anyone has logged in) to run its real
-  pre-suspend handling, including releasing DRM master, before the kernel
-  actually suspends. That one difference alone wins the race reliably, with
-  under 30 seconds elapsed since boot and zero desktop activity — the
-  earlier idle-time and GPU-activity correlations were both confounds: every
-  prior "it won" trial happened to use `systemctl suspend`, every prior "it
-  lost" trial happened to use `rtcwake -m mem`.
-
-  This makes full unattended automation straightforward: arm the RTC wake
-  alarm separately (`rtcwake -m no -s N`, which only sets the alarm and does
-  not itself suspend anything — util-linux's `rtcwake` rejects `-s 0`
-  outright as "must provide wake time", and rejects fractional values like
-  `0.1` since the kernel's RTC alarm ioctl has no sub-second field; `1` is
-  the real floor), then call `systemctl suspend` — getting the winning
-  suspend path and an unattended auto-wake together. A `oneshot` systemd
-  service gated on `ConditionPathExists=/sys/module/ga107_unlock` and run
-  after `graphical.target`, with no session-detection wait at all, wins
-  reliably even before any user has logged in (GDM's own greeter session is
-  enough) — measured consistently at 5-7 seconds total (suspend entry to
-  exit), which appears to be this board's actual ACPI S3 hardware floor
-  rather than anything tunable in software.
+- **Resume success is fully automatable — see General procedure step 7.**
+  The resume re-unlock above doesn't win every time on its own; dozens of
+  scripted trials isolated the real variable (which code path triggers
+  suspend, not elapsed time or GPU/input activity — `glxgears` sustained 58s
+  at 144 FPS, continuous `ydotool` mouse movement, and an `ffplay` synthetic
+  test-pattern window were all tried and all lost under `rtcwake -m mem`).
+  On this board, the `rtcwake -m no` + `systemctl suspend` combination from
+  the general procedure wins reliably, even seconds after boot and before
+  any user has logged in (GDM's own greeter session handles it the same way
+  a real desktop session does) — measured consistently at 5-7 seconds total
+  suspend-entry-to-exit, which appears to be this board's actual ACPI S3
+  hardware floor rather than anything tunable in software.
 - **Laptop-specific gotchas hit while measuring this:**
   - Booting with the unlock module active changed which display scale GDM
     picked (100% instead of the usual 125%) — GDM's own `mutter` instance
