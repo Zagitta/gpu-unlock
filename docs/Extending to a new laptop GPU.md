@@ -158,7 +158,28 @@ PCI `10de:25ec`, subsystem `17aa:3c90` (Lenovo board `GN20-P0-R-K2`), driver
     mechanism (set automatically by `force_drivers`) loads it ahead of udev
     on its own, no custom ordering hook needed.
 - **Real-model benchmark** (transformer + CNN train/inference, not just the
-  register microbenchmark above): pending.
+  register microbenchmark above): confirms it holds up outside a synthetic
+  register-only kernel, at a lower margin than the raw ~2x instruction-issue
+  rate, as expected once memory bandwidth and non-tensor-core work dilute it.
+  `fp32` (no tensor cores, the control) is flat on both models, as it should
+  be if this is really a tensor-core effect and not a general clock/power
+  change:
+
+  | Model | Precision | Train | Inference |
+  | --- | --- | ---: | ---: |
+  | Transformer | fp32 (control) | +2.7% | +3.8% |
+  | Transformer | tf32 | +30.0% | +46.3% |
+  | Transformer | fp16 (amp) | +21.7% | +31.3% |
+  | Transformer | bf16 (amp) | +21.4% | +32.2% |
+  | CNN (ResNet-18) | fp32 (control) | -0.0% | -0.1% |
+  | CNN (ResNet-18) | tf32 | +13.8% | +17.7% |
+  | CNN (ResNet-18) | fp16 (amp) | +17.9% | +17.3% |
+  | CNN (ResNet-18) | bf16 (amp) | +17.2% | +18.6% |
+
+  The transformer (GEMM-dominated, synthetic tokens) shows a cleaner, larger
+  gain than the CNN (cuDNN picks the conv algorithm per layer, not every
+  shape is tensor-core shaped) — the same pattern the register microbenchmark
+  predicted.
 - **Prior art.** [`IHaBiS02/ga107-unlock`](https://github.com/IHaBiS02/ga107-unlock)
   independently targets a different GA107 board (LG, subsystem `1854:052f`) as a
   single-board-hardcoded fork of an earlier version of this module. This entry
