@@ -362,7 +362,7 @@ int main(int argc, char **argv) {
     }
     /* Actual PROM -> descriptor -> patch -> GSP DMA/start -> WPR validation.
      * Faults after firmware access retain DMA, without starting SEC2. */
-    for(int mode=0;mode<10;mode++) {
+    for(int mode=0;mode<12;mode++) {
         setup(&w);
         u8 *rom=(u8 *)regs+0x300000;
         load_rom(argc>=2?argv[1]:NULL);
@@ -380,11 +380,16 @@ int main(int argc, char **argv) {
         if(mode==7)fake.fail_alloc=1;
         if(mode==8)fake.master_fail=1;
         if(mode==9)rom[parsed.sig_off-44+37]=1; /* wrong engine mask */
+        /* DMEM load size not a whole DMA block (GA106 10de:2544 has 0x980):
+         * rounded up within the image, or rejected before the GSP starts. */
+        if(mode==10)vbios_w32(rom+parsed.sig_off-44+32,parsed.image_size-parsed.data_off-128);
+        if(mode==11)vbios_w32(rom+parsed.sig_off-44+32,parsed.image_size-parsed.data_off+1);
         int ret=unlock_transaction_fwsec(&w);
         assert(!fake.starts && !fake.flrs);
-        if(mode==0) {
+        if(mode==0 || mode==10) {
             assert(!ret && fake.gsp_starts==1);
             assert(strstr(fake.log,"FWSEC WPR2:"));
+            if(mode==10)assert(strstr(fake.log,"rounded to"));
         } else {
             assert(ret);
             if(mode>=6)assert(!fake.gsp_starts && !w.firmware_started);

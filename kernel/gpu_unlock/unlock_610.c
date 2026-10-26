@@ -926,7 +926,7 @@ static int unlock_transaction_fwsec(struct unlock_transaction_work *work)
 	size_t mapped = 0;
 	u8 *rom = NULL;
 	struct gpu_unlock_fwsec fw;
-	u32 fuse_raw, version, scratch, wpr_lo, wpr_hi;
+	u32 fuse_raw, version, scratch, wpr_lo, wpr_hi, dmem_size;
 	u16 command;
 	u64 frts = work->layout.frts_offset;
 	void *image = NULL;
@@ -982,6 +982,28 @@ static int unlock_transaction_fwsec(struct unlock_transaction_work *work)
 			goto out;
 		memcpy((u8 *)image + fw.data_off + fw.pkc_off, rom + fw.sig_off + sig_at, 384);
 	}
+	/* Some GA106 VBIOSes (10de:2544, 94.06.54) store a DMEM load size that is
+	 * not a whole DMA block (0x980). s_dmaTransfer_GA102 moves whole 256-byte
+	 * blocks until it covers the size, so load the same rounded-up range. */
+	dmem_size = (fw.dmem_size + 255) & ~255u;
+	if (dmem_size < fw.dmem_size || (u64)fw.data_off + dmem_size > fw.image_size) {
+		dev_err(&work->pdev->dev, "FWSEC: DMEM %#x at %#x exceeds image %#x\n",
+			dmem_size, fw.data_off, fw.image_size);
+		ret = -ERANGE;
+		goto out;
+	}
+	if (dmem_size != fw.dmem_size)
+		dev_info(&work->pdev->dev, "FWSEC: DMEM load size %#x rounded to %#x\n",
+			 fw.dmem_size, dmem_size);
+	/* falcon_hs rejects these before touching the engine; check them here,
+	 * before firmware_started, so a rejection releases the card to nvidia. */
+	if (image_dma < fw.imem_va ||
+	    !falcon_dma_valid(fw.imem_pa, fw.imem_va, image_dma - fw.imem_va, fw.imem_size) ||
+	    (dmem_size && !falcon_dma_valid(fw.dmem_pa, 0, image_dma + fw.data_off, dmem_size))) {
+		dev_err(&work->pdev->dev, "FWSEC: DMA geometry rejected before launch\n");
+		ret = -EINVAL;
+		goto out;
+	}
 	pci_set_master(work->pdev);
 	work->master = true;
 	if (diag_pci_word(work, false, PCI_COMMAND, &command) ||
@@ -991,7 +1013,7 @@ static int unlock_transaction_fwsec(struct unlock_transaction_work *work)
 	}
 	work->firmware_started = true;
 	ret = falcon_hs(work, &gsp, 0, fw.imem_size, fw.imem_va, fw.imem_pa,
-			fw.data_off, fw.dmem_size, fw.dmem_pa, fw.pkc_off,
+			fw.data_off, dmem_size, fw.dmem_pa, fw.pkc_off,
 			fw.engine_mask, fw.ucode_id,
 			image_dma, 0, 0, false);
 	if (ret)
