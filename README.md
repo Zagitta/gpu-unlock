@@ -81,6 +81,27 @@ in `/etc/default/grub`, then run `sudo update-grub`.
 - **UKI / generated entries:** add it to `/etc/kernel/cmdline` and regenerate
 your boot images/entries (e.g. `sudo mkinitcpio -P` for mkinitcpio UKIs).
 
+### Secure Boot
+
+With Secure Boot on, the kernel loads `gpu_unlock` only if it is signed with
+an enrolled key. DKMS signs what it builds with the `mok_signing_key` and
+`mok_certificate` from its framework config. Without them it uses a key of
+its own (`/var/lib/dkms/mok.key`; on Ubuntu the shim-signed MOK), which has
+to be enrolled once with `mokutil --import` and a reboot into MokManager.
+
+- **Fedora with RPM Fusion `akmod-nvidia`:** the akmods key is already
+enrolled, since the NVIDIA module is signed with it. Point DKMS at it before
+`make install` and nothing new needs enrolling:
+
+```sh
+sudo mkdir -p /etc/dkms/framework.conf.d
+printf 'mok_signing_key=/etc/pki/akmods/private/private_key.priv\nmok_certificate=/etc/pki/akmods/certs/public_key.der\n' |
+  sudo tee /etc/dkms/framework.conf.d/akmods-key.conf
+```
+
+`modinfo gpu_unlock | grep signer` should then print the same signer as
+`modinfo nvidia | grep signer`.
+
 
 
 ## Local build
