@@ -1,0 +1,31 @@
+name: Nix
+
+on:
+  push:
+    paths:
+      - flake.nix
+      - flake.lock
+      - nix/**
+      - kernel/**
+      - firmware/**
+      - tests/**
+      - Makefile
+      - VERSION
+      - packaging/**
+      - debian/**
+      - licenses/**
+      - .gitattributes
+      - .github/workflows/nix.yml
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  flake-check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: cachix/install-nix-action@d9186cbdca7adedf113a159fa91f725a27866771 # v31
+      - run: nix flake check --print-build-logs
