@@ -48,6 +48,16 @@ class PackageTests(unittest.TestCase):
                                         capture_output=True, text=True, check=True)
                 self.assertEqual(result.stdout.strip(), after)
 
+    def test_dkms_skips_kernels_before_6_0(self):
+        # Same test dkms itself applies: source dkms.conf, then bash =~.
+        conf = ROOT / "kernel/gpu_unlock/dkms.conf"
+        for kernel, skipped in (("5.15.0-198-generic", True), ("5.19.0-50-generic", True),
+                                ("6.1.0-27-amd64", False), ("6.8.0-138-generic", False),
+                                ("7.0.14-17-pve", False), ("10.1.0", False)):
+            result = subprocess.run(["bash", "-c", f'. {conf}; [[ $1 =~ $BUILD_EXCLUSIVE_KERNEL ]]',
+                                     "bash", kernel])
+            self.assertEqual(result.returncode != 0, skipped, kernel)
+
     def test_pkgbuild_pins_match_manifest(self):
         manifest = json.loads((ROOT / "firmware/artifacts-610.43.03.json").read_text())
         pkgbuild = (ROOT / "packaging/arch/PKGBUILD").read_text()
