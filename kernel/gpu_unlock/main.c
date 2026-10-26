@@ -18,9 +18,9 @@ static bool resume = true;
 module_param(resume, bool, 0644);
 MODULE_PARM_DESC(resume, "Unlock the cards again after resume from suspend, which powers them off (default: on)");
 
-/* GA102, GA103, GA104 and GA106 GPU functions in pci.ids, excluding audio
- * functions and the professional (GL) parts, which already run BF16 at full
- * rate. GA103 and GA106 also exclude mobile parts.
+/* GA102, GA103, GA104, GA106 and GA107 GPU functions in pci.ids, excluding
+ * audio functions and the professional (GL) parts, which already run BF16 at
+ * full rate. GA103 and GA106 also exclude other mobile parts.
  */
 static const unsigned short supported_ids[] = {
 	/* GA102 */
@@ -36,6 +36,11 @@ static const unsigned short supported_ids[] = {
 	/* GA106 (validated only on RTX 3060 12GB 0x2504) */
 	0x2501, 0x2503, 0x2504, 0x2505, 0x2507, 0x2508, 0x2509, 0x252f,
 	0x2544,
+	/* GA107 (validated only on a Lenovo RTX 3050 6GB Laptop, subsystem
+	 * 17aa:3c90; see docs/Extending to a new laptop GPU.md). Cold-probe
+	 * unlock did not survive nvidia binding on that board; the resume
+	 * re-unlock above did. */
+	0x25ec,
 };
 
 /* A target card. Those unlocked at boot stay listed, with a reference, to be
