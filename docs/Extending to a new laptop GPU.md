@@ -108,28 +108,51 @@ PCI `10de:25ec`, subsystem `17aa:3c90` (Lenovo board `GN20-P0-R-K2`), driver
   unaffected (~510), consistent with only fp16/bf16 going through this
   selector. On this board, the resume path is what makes the unlock usable —
   the boot-time path alone is not enough.
-- **Resume success itself is conditional, not guaranteed.** The resume
-  re-unlock above doesn't win every time — it's a real race against
-  `nvidia`'s own `PM_POST_SUSPEND` resume notifier, and priority ordering
-  alone didn't settle it in practice. Automating `systemctl suspend` (via
-  `rtcwake`, scripted, no real desktop activity beforehand) lost this race
-  consistently — every single attempt, across dozens of trials, whether
-  triggered right at the login screen, after a fixed delay up to ~90 seconds
-  post-login, or immediately following an automated attempt to generate GPU
-  load. Suspending by hand after ~5 minutes of simply being logged in (no
-  deliberate activity) won immediately; suspending after as little as ~60
-  seconds of genuine desktop use (moving windows, video playback) also won
-  immediately. The exact trigger isn't pinned down — accumulated real
-  GPU/display activity and a longer idle threshold than any scripted retry
-  loop was given are both still candidates — but on this board, "retry a
-  plain suspend/resume a few times right after boot" does not reliably work;
-  only a deliberately delayed or human-driven suspend has, so far.
+- **Resume success is fully automatable once suspend is triggered the right
+  way — the deciding variable is not time or GPU activity, it's which code
+  path initiates suspend.** The resume re-unlock above doesn't win every
+  time; it's a real race against `nvidia`'s own `PM_POST_SUSPEND` resume
+  notifier, and the module's higher notifier priority alone doesn't settle
+  it. Dozens of scripted trials using `rtcwake -m mem` (writes straight to
+  `/sys/power/state`, bypassing `systemd-logind` entirely) lost this race
+  consistently, regardless of elapsed time (up to ~250s tested) or GPU/input
+  activity injected beforehand (`glxgears` sustained 58s at 144 FPS with PCI
+  runtime-autosuspend forced off; continuous synthetic mouse movement via
+  `ydotool`; an `ffplay` synthetic test-pattern window) — all lost. The one
+  pattern that won, every time it was tried, was `systemctl suspend`: it
+  goes through logind's D-Bus `Suspend()` method, which tells the running
+  Wayland compositor (Mutter — a user's own desktop session, or even GDM's
+  own greeter compositor before anyone has logged in) to run its real
+  pre-suspend handling, including releasing DRM master, before the kernel
+  actually suspends. That one difference alone wins the race reliably, with
+  under 30 seconds elapsed since boot and zero desktop activity — the
+  earlier idle-time and GPU-activity correlations were both confounds: every
+  prior "it won" trial happened to use `systemctl suspend`, every prior "it
+  lost" trial happened to use `rtcwake -m mem`.
+
+  This makes full unattended automation straightforward: arm the RTC wake
+  alarm separately (`rtcwake -m no -s N`, which only sets the alarm and does
+  not itself suspend anything — util-linux's `rtcwake` rejects `-s 0`
+  outright as "must provide wake time", and rejects fractional values like
+  `0.1` since the kernel's RTC alarm ioctl has no sub-second field; `1` is
+  the real floor), then call `systemctl suspend` — getting the winning
+  suspend path and an unattended auto-wake together. A `oneshot` systemd
+  service gated on `ConditionPathExists=/sys/module/ga107_unlock` and run
+  after `graphical.target`, with no session-detection wait at all, wins
+  reliably even before any user has logged in (GDM's own greeter session is
+  enough) — measured consistently at 5-7 seconds total (suspend entry to
+  exit), which appears to be this board's actual ACPI S3 hardware floor
+  rather than anything tunable in software.
 - **Laptop-specific gotchas hit while measuring this:**
   - Booting with the unlock module active changed which display scale GDM
     picked (100% instead of the usual 125%) — GDM's own `mutter` instance
     enumerates GPUs differently depending on whether `nvidia` is already active
     at GDM startup. An Optimus/dual-GPU desktop-environment effect, unrelated to
     this module.
+  - The forced suspend/resume cycle (whether automated or manual) resets
+    GNOME's Night Light (warm color) setting — the same category of effect as
+    the GDM display-scale quirk above: the compositor treats the display as
+    freshly reconnected. Cosmetic, not a sign the unlock itself failed.
   - An MMIO readback where SS0, SS1 and the PLM register all come back
     `0xffffffff` together almost always means the card is in PCI runtime
     autosuspend (D3cold), not that the unlock was undone. Check
