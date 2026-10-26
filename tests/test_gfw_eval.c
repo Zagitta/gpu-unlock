@@ -27,6 +27,10 @@ int main(void)
 	sample.plm = (u32)~0U;
 	sample.cpuctl = (u32)~0U;
 	assert(gpu_unlock_gfw_assess(&sample) == -ENODEV);
+	sample.boot = 0xbadf00ff;
+	sample.plm = 0xbadf0001;
+	sample.cpuctl = 0xbadf0010;
+	assert(gpu_unlock_gfw_assess(&sample) == -EAGAIN);
 	sample.boot = GU_GFW_BOOT_COMPLETED;
 	sample.plm = GU_GFW_PLM_LEVEL0;
 	sample.cpuctl = GU_GFW_CPUCTL_HALTED;
