@@ -17,6 +17,10 @@ fedora)
 	install="dnf install -qy build/rpm/RPMS/noarch/*.rpm"
 	remove="dnf remove -qy"
 	boot=$dracut ;;
+opensuse*)
+	install="zypper -n install --allow-unsigned-rpm build/rpm/RPMS/noarch/*.rpm"
+	remove="zypper -n remove"
+	boot=$dracut ;;
 arch)
 	install="pacman -U --noconfirm packaging/arch/*.pkg.tar.zst"
 	remove="pacman -Rns --noconfirm"

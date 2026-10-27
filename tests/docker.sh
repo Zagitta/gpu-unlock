@@ -22,7 +22,8 @@ if [ $# -eq 0 ]; then
 		set -- debian:13
 	else
 		set -- debian:12 debian:13 ubuntu:22.04 ubuntu:24.04 \
-			ubuntu:26.04 fedora:43 fedora:latest archlinux:latest
+			ubuntu:26.04 fedora:43 fedora:latest archlinux:latest \
+			opensuse/tumbleweed
 	fi
 fi
 
@@ -36,6 +37,8 @@ debian|ubuntu)
 	apt-get install -qy --no-install-recommends ca-certificates git make xz-utils zstd ;;
 fedora)
 	dnf install -qy git make xz zstd rpm-build dnf-plugins-core ;;
+opensuse*)
+	zypper -n install git make xz zstd rpm-build ;;
 arch)
 	pacman -Syu --noconfirm --needed base-devel git zstd ;;
 esac

@@ -30,7 +30,7 @@ DEBS    := $(foreach p,dkms firmware,$(DEBDIR)/gpu-unlock-$(p)_$(VERSION)_all.de
 
 .PHONY: all dist inputs firmware assets install-dkms install-firmware \
         install-mkinitcpio install-initramfs-tools install-dracut \
-        install-licenses arch deb rpm install install-arch install-deb install-rpm \
+        install-licenses arch deb rpm install install-arch install-deb install-rpm install-suse \
         test-module test-packages test-local \
         modules clean-modules dkms-install dkms-uninstall install-boot \
         rebuild-initramfs install-local uninstall-local insmod rmmod status \
@@ -212,6 +212,7 @@ install:
 			arch) echo "Detected $$_distro; running make install-arch"; $(MAKE) install-arch; exit 0 ;; \
 			debian|ubuntu) echo "Detected $$_distro; running make install-deb"; $(MAKE) install-deb; exit 0 ;; \
 			fedora|rhel|centos) echo "Detected $$_distro; running make install-rpm"; $(MAKE) install-rpm; exit 0 ;; \
+			opensuse*|suse) echo "Detected $$_distro; running make install-suse"; $(MAKE) install-suse; exit 0 ;; \
 			*) continue ;; \
 		esac; \
 	done; \
@@ -219,7 +220,7 @@ install:
 		echo "No native packager for $${ID:-unknown}; using the DKMS install."; \
 		$(MAKE) install-local; exit 0; \
 	fi; \
-	echo "Unsupported distribution: $${ID:-unknown}. Use make install-arch, install-deb, install-rpm, or install-local (needs dkms)." >&2; \
+	echo "Unsupported distribution: $${ID:-unknown}. Use make install-arch, install-deb, install-rpm, install-suse, or install-local (needs dkms)." >&2; \
 	exit 1
 
 arch:
@@ -252,6 +253,12 @@ install-rpm:
 	sudo dnf builddep -y packaging/rpm/gpu-unlock.spec
 	$(MAKE) rpm
 	sudo dnf install -y $(RPMDIR)/RPMS/noarch/gpu-unlock-*-$(VERSION)-*.noarch.rpm
+
+install-suse:
+	sudo zypper -n install rpm-build
+	sudo zypper -n install $$(rpmspec -q --buildrequires packaging/rpm/gpu-unlock.spec)
+	$(MAKE) rpm
+	sudo zypper -n install --allow-unsigned-rpm $(RPMDIR)/RPMS/noarch/gpu-unlock-*-$(VERSION)-*.noarch.rpm
 
 # Build the module, or build, install and remove the packages, in a
 # container of each distribution.
