@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0-only
-# Maintainer: Matthias Schabhüttl
+# Contributor: Matthias Schabhüttl
+# AUR maintenance is unassigned; add a Maintainer contact before publication.
 # Based on Zagitta/gpu-unlock's upstream Arch packaging.
 # Fixed 1.1.0 snapshot; upstream had no release tags when this was prepared.
 # Standalone build: cd packaging/aur && makepkg -si
