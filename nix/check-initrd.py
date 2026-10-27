@@ -58,7 +58,8 @@ for name, digest in expected.items():
             if copies[0].suffix == ".zst" else copies[0].read_bytes())
     assert hashlib.sha256(data).hexdigest() == digest, name
 
-modules = list(root.glob(f"nix/store/*/lib/modules/{kernel}/extra/gpu_unlock.ko*"))
+modules = [p for p in root.glob(f"nix/store/*/lib/modules/{kernel}/extra/gpu_unlock.ko*")
+           if p.name in ("gpu_unlock.ko", "gpu_unlock.ko.zst", "gpu_unlock.ko.xz")]
 assert len(modules) == 1, modules
 assert subprocess.check_output(["modinfo", "-F", "vermagic", str(modules[0])], text=True).startswith(kernel + " ")
 if sys.argv[5] == "systemd":

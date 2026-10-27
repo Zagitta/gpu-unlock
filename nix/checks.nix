@@ -6,7 +6,7 @@ let
     system = "x86_64-linux";
     modules = [
       ./module.nix
-      {
+      ({ options, ... }: {
         nixpkgs.pkgs = pkgs;
         system.stateVersion = "26.05";
         boot.loader.grub.enable = false;
@@ -14,8 +14,10 @@ let
         hardware.cpu.intel.updateMicrocode = false;
         hardware.cpu.amd.updateMicrocode = false;
         hardware.nvidia.gpuUnlock = { inherit enable targets; };
-        boot.initrd.systemd.enable = systemdInitrd;
-      }
+        boot.initrd.systemd = lib.optionalAttrs
+          ((options.boot.initrd.systemd.enable.type.name or null) == "bool")
+          { enable = systemdInitrd; };
+      })
     ];
   };
   enabled = (makeSystem true [ "0000:01:00.0" ]).config;

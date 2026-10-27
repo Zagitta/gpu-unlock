@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: GPL-2.0-only
-{ lib, stdenv, fetchurl, python3, zstd, kernel }:
+{ lib, stdenv, fetchurl, python3, zstd, kernel, kernelModuleMakeFlags }:
 let
   version = lib.removeSuffix "\n" (builtins.readFile ../VERSION);
+  kernelBuild = "${kernel.dev}/lib/modules/${kernel.modDirVersion}/build";
+  kbuildFlags = lib.escapeShellArgs kernelModuleMakeFlags;
   # Build the source in this checkout, including downstream changes. Keep Nix
   # metadata outside the source closure so updating flake.lock alone is cheap.
   src = lib.fileset.toSource {
@@ -66,12 +68,14 @@ stdenv.mkDerivation {
   hardeningDisable = [ "pic" ];
   buildPhase = ''
     runHook preBuild
-    make -C kernel/gpu_unlock KDIR=${kernel.dev}/lib/modules/${kernel.modDirVersion}/build KCFLAGS=-Werror
+    make -C ${kernelBuild} M=$PWD/kernel/gpu_unlock ${kbuildFlags} KCFLAGS=-Werror modules
     runHook postBuild
   '';
   installPhase = ''
     runHook preInstall
-    install -Dm644 kernel/gpu_unlock/gpu_unlock.ko $out/lib/modules/${kernel.modDirVersion}/extra/gpu_unlock.ko
+    # Use Kbuild installation so nixpkgs signing/certificate flags are honored.
+    make -C ${kernelBuild} M=$PWD/kernel/gpu_unlock ${kbuildFlags} \
+      INSTALL_MOD_PATH=$out INSTALL_MOD_DIR=extra DEPMOD=true modules_install
     install -Dm644 README.md $out/share/doc/gpu-unlock/README.md
     install -Dm644 licenses/GPL-2.0.txt $out/share/licenses/gpu-unlock/GPL-2.0.txt
     runHook postInstall

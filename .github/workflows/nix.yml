@@ -25,7 +25,14 @@ permissions:
 jobs:
   flake-check:
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        nixpkgs: [locked, unstable]
     steps:
       - uses: actions/checkout@v5
       - uses: cachix/install-nix-action@d9186cbdca7adedf113a159fa91f725a27866771 # v31
-      - run: nix flake check --print-build-logs
+      - if: matrix.nixpkgs == 'locked'
+        run: nix flake check --print-build-logs
+      - if: matrix.nixpkgs == 'unstable'
+        run: nix flake check --print-build-logs --override-input nixpkgs github:NixOS/nixpkgs/nixos-unstable --no-write-lock-file

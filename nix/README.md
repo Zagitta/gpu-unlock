@@ -62,7 +62,8 @@ Run these from the checkout. The flake permits its firmware package's unfree
 license; the NixOS module follows your system's license policy.
 
 Checks compile the module, run the upstream tests, and verify the module ABI,
-firmware hashes, and loading order in both initrd formats. They require no GPU
+firmware hashes, and loading order in the initrd formats supported by NixOS. CI
+covers both the locked nixpkgs and unstable. Checks require no GPU
 and do not validate hardware compatibility or performance.
 
 See [`firmware/NOTICE.md`](../firmware/NOTICE.md) and `licenses/` for license terms.
