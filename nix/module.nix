@@ -1,7 +1,11 @@
 # SPDX-License-Identifier: GPL-2.0-only
-{ config, lib, pkgs, ... }:
+{ config, lib, options, pkgs, ... }:
 let
   cfg = config.hardware.nvidia.gpuUnlock;
+  # Newer NixOS releases retain a throwing removed-option stub. Inspect the
+  # declaration rather than evaluating that removed configuration value.
+  hasInitrdToggle = (options.boot.initrd.systemd.enable.type.name or null) == "bool";
+  systemdInitrd = !hasInitrdToggle || config.boot.initrd.systemd.enable;
   pciTarget = lib.types.strMatching "(all|[[:xdigit:]]{4}:[[:xdigit:]]{2}:[[:xdigit:]]{2}\\.[0-7])";
 in
 {
@@ -46,7 +50,7 @@ in
     # Scripted stage 1 loads this synchronously before starting udev.
     boot.initrd.kernelModules = lib.mkBefore [ "gpu_unlock" ];
     # For systemd stage 1, finish before coldplug or explicit modules can bind NVIDIA.
-    boot.initrd.systemd.services.gpu-unlock = lib.mkIf config.boot.initrd.systemd.enable {
+    boot.initrd.systemd.services.gpu-unlock = lib.mkIf systemdInitrd {
       description = "Unlock Ampere Tensor rate before NVIDIA probes";
       wantedBy = [ "sysinit.target" ];
       before = [ "systemd-modules-load.service" "systemd-udevd.service" "systemd-udev-trigger.service" ];
@@ -57,7 +61,7 @@ in
         ExecStart = "${pkgs.kmod}/bin/modprobe gpu_unlock";
       };
     };
-    boot.initrd.systemd.storePaths = lib.mkIf config.boot.initrd.systemd.enable [ "${pkgs.kmod}/bin/modprobe" ];
+    boot.initrd.systemd.storePaths = lib.mkIf systemdInitrd [ "${pkgs.kmod}/bin/modprobe" ];
     boot.kernelParams = [
       "gpu_unlock.targets=${lib.concatStringsSep "," cfg.targets}"
       "gpu_unlock.resume=${if cfg.resume then "1" else "0"}"
