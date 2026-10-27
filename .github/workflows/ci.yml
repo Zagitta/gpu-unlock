@@ -54,6 +54,8 @@ jobs:
             setup: dnf install -qy git
           - image: archlinux:latest  # 7.2, 6.18 LTS
             setup: pacman -Syu --noconfirm --needed git
+          - image: opensuse/tumbleweed  # 7.2
+            setup: zypper -n install git
     steps:
       # Without git the checkout is a GitHub archive, which leaves out
       # everything .gitattributes marks export-ignore, .github included.
@@ -86,6 +88,8 @@ jobs:
             setup: dnf install -qy git make xz zstd rpm-build dnf-plugins-core
           - image: archlinux:latest
             setup: pacman -Syu --noconfirm --needed base-devel git zstd
+          - image: opensuse/tumbleweed
+            setup: zypper -n install git make xz zstd rpm-build
     steps:
       # git before the checkout, as above and so make dist and makepkg can
       # build HEAD; zstd before the cache restore, which needs it.

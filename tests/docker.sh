@@ -16,7 +16,7 @@ if [ "$job" = package ]; then
 fi
 commit=$(packaging/snapshot.sh)
 [ $# -gt 0 ] || set -- debian:12 debian:13 ubuntu:22.04 ubuntu:24.04 \
-	ubuntu:26.04 fedora:43 fedora:latest archlinux:latest
+	ubuntu:26.04 fedora:43 fedora:latest archlinux:latest opensuse/tumbleweed
 
 # The same setup as the CI jobs. The job runs on a clone so that nothing
 # in the checkout ends up owned by root.
@@ -28,6 +28,8 @@ debian|ubuntu)
 	apt-get install -qy --no-install-recommends ca-certificates git make xz-utils zstd ;;
 fedora)
 	dnf install -qy git make xz zstd rpm-build dnf-plugins-core ;;
+opensuse*)
+	zypper -n install git make xz zstd rpm-build ;;
 arch)
 	pacman -Syu --noconfirm --needed base-devel git zstd ;;
 esac

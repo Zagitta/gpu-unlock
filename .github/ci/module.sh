@@ -18,6 +18,8 @@ ubuntu)
 		/usr/src/linux-headers-*/.config | grep -o 'gcc-[0-9]*' | sort -u) ;;
 fedora)
 	dnf install -qy make gcc kernel-devel ;;
+opensuse*)
+	zypper -n install make gcc kernel-default-devel ;;
 arch)
 	pacman -Syu --noconfirm --needed make gcc linux-headers linux-lts-headers ;;
 *)
