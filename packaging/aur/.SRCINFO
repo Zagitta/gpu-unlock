@@ -1,0 +1,32 @@
+pkgbase = gpu-unlock
+	pkgdesc = Pre-driver NVIDIA GPU unlock for full FP16/BF16 tensor instruction rate
+	pkgver = 1.1.0
+	pkgrel = 1
+	url = https://github.com/Zagitta/gpu-unlock
+	arch = x86_64
+	license = GPL-2.0-only
+	makedepends = python
+	makedepends = zstd
+	noextract = NVIDIA-Linux-x86_64-610.43.03-no-compat32.run
+	options = !strip
+	options = !debug
+	source = gpu-unlock-6081407b312aa3139a2bed62bdda354f4ffddc1d.tar.gz::https://github.com/Zagitta/gpu-unlock/archive/6081407b312aa3139a2bed62bdda354f4ffddc1d.tar.gz
+	source = https://download.nvidia.com/XFree86/NVIDIA-kernel-module-source/NVIDIA-kernel-module-source-610.43.03.tar.xz
+	source = https://download.nvidia.com/XFree86/Linux-x86_64/610.43.03/NVIDIA-Linux-x86_64-610.43.03-no-compat32.run
+	source = gpu-unlock.install
+	sha256sums = 498c9840e025e5b46d2cad5998dee25c014da226c5f14dec4ea2b73e5244fd2e
+	sha256sums = 7e118923c7a23edc36114d63273a46e3e04e9af98695a42203e7ac2dfe9fc1dc
+	sha256sums = e084451db730a6df29d3d74f655749c4d236e3c945f7d94b5205e84318fe2f90
+	sha256sums = a2b008f9261d531e824e99f3252a87acf46e7b8cb96809a1d7c486b3ac00042f
+
+pkgname = gpu-unlock-dkms
+	pkgdesc = Pre-driver NVIDIA GPU tensor-rate unlock (DKMS sources)
+	install = gpu-unlock.install
+	depends = dkms
+	depends = gpu-unlock-firmware=1.1.0-1
+	backup = etc/mkinitcpio.conf.d/zz-gpu-unlock.conf
+
+pkgname = gpu-unlock-firmware
+	pkgdesc = NVIDIA firmware assets extracted locally for gpu-unlock
+	license = LicenseRef-NVIDIA
+	license = GPL-2.0-only

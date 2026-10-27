@@ -1,0 +1,7 @@
+/src/
+/pkg/
+/*.pkg.tar.*
+/*.src.tar.*
+/gpu-unlock-*.tar.gz
+/NVIDIA-*
+/*.log
