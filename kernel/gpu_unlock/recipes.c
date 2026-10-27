@@ -156,7 +156,7 @@ static const struct gu_family ga100 = {
 	.fwsec_version = 2,
 };
 static const struct gu_family ga10x = {
-	.name = "GA102/GA103/GA104/GA106",
+	.name = "GA102/GA103/GA104/GA106/GA107",
 	.privileged = GU_WRITE_TABLE(ga10x_plm),
 	.host = GU_WRITE_TABLE(selectors),
 	.fw = &ga10x_fw,
@@ -181,6 +181,7 @@ static const struct gu_family ad102 = {
 #define GA103(id) { id, 0x173, &ga10x }
 #define GA104(id) { id, 0x174, &ga10x }
 #define GA106(id) { id, 0x176, &ga10x }
+#define GA107(id) { id, 0x177, &ga10x }
 
 static const struct gu_card cards[] = {
 	GA102(0x2200), GA102(0x2203), GA102(0x2204), GA102(0x2205),
@@ -201,6 +202,9 @@ static const struct gu_card cards[] = {
 	GA106(0x2501), GA106(0x2503), GA106(0x2504), GA106(0x2505),
 	GA106(0x2507), GA106(0x2508), GA106(0x2509), GA106(0x252f),
 	GA106(0x2544),
+
+	/* GA107 laptop — validated 10de:25a5 (docs/compatibility/asus-tuf-f15-rtx3050-mobile-25a5.md) */
+	GA107(0x25a5),
 };
 
 const struct gu_card *gu_card_find(u16 device)

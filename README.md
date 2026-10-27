@@ -115,7 +115,7 @@ gpu_unlock.targets=0000:21:00.0,0000:22:00.0    # comma-separated
 
 Addresses are full PCI names as `lspci -D` prints them (hex digits in either
 case), independent of GPU numbering and display role. An entry that is not
-a supported recipe (GA100/GA102/GA103/GA104/GA106 or RTX 4090), including `all` mixed with addresses, is logged and ignored.
+a supported recipe (GA100/GA102/GA103/GA104/GA106/GA107 or RTX 4090), including `all` mixed with addresses, is logged and ignored. GA107 laptop IDs are experimental; see `docs/compatibility/`.
 The cards are unlocked concurrently, about a second in all however many
 there are, and each on its own: a card that is already bound or powered
 down is skipped. Bus mastering that the board firmware left on (Supermicro

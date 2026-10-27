@@ -81,6 +81,8 @@ install-initramfs-tools:
 		$(DESTDIR)/usr/share/initramfs-tools/modules.d/gpu-unlock.conf
 	install -Dm755 packaging/boot/initramfs-tools-init-top \
 		$(DESTDIR)/usr/share/initramfs-tools/scripts/init-top/gpu-unlock
+	install -Dm755 packaging/boot/initramfs-tools-hook \
+		$(DESTDIR)/usr/share/initramfs-tools/hooks/gpu-unlock
 
 install-dracut:
 	install -Dm644 packaging/boot/dracut.conf $(DESTDIR)/usr/lib/dracut/dracut.conf.d/gpu-unlock.conf
