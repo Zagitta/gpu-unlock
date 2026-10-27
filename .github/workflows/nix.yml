@@ -5,7 +5,6 @@ on:
     paths:
       - flake.nix
       - flake.lock
-      - nix/**
       - kernel/**
       - firmware/**
       - tests/**

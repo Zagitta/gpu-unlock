@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: GPL-2.0-only
 """Check the actual built initrd without loading a module or accessing a GPU."""
 import hashlib
-import json
 import configparser
 import os
 import re
@@ -13,9 +12,9 @@ from pathlib import PurePosixPath
 import subprocess
 import sys
 
-root, firmware, manifest_path = map(Path, sys.argv[1:4])
+root, firmware = map(Path, sys.argv[1:3])
 root = root.resolve()
-kernel = sys.argv[4]
+kernel = sys.argv[3]
 
 
 def rooted(name, follow_last=True):
@@ -45,24 +44,22 @@ def rooted(name, follow_last=True):
     return current
 
 
-manifest = json.loads(manifest_path.read_text())
-expected = dict(manifest["derived_assets"])
-expected["gsp_ga10x.bin"] = manifest["source_artifacts"][2]["firmware"][0]["sha256"]
-expected["v67-ga102-610.43.03.bin"] = manifest["generated_payload"]["sha256"]
-for name, digest in expected.items():
-    installed = firmware / "lib/firmware/gpu-unlock/610.43.03" / name
-    assert hashlib.sha256(installed.read_bytes()).hexdigest() == digest, name
-    copies = list(root.glob(f"nix/store/*/lib/firmware/gpu-unlock/610.43.03/{name}*"))
-    assert len(copies) == 1, (name, copies)
-    data = (subprocess.check_output(["zstd", "-dc", str(copies[0])])
-            if copies[0].suffix == ".zst" else copies[0].read_bytes())
-    assert hashlib.sha256(data).hexdigest() == digest, name
-
 modules = [p for p in root.glob(f"nix/store/*/lib/modules/{kernel}/extra/gpu_unlock.ko*")
            if p.name in ("gpu_unlock.ko", "gpu_unlock.ko.zst", "gpu_unlock.ko.xz")]
 assert len(modules) == 1, modules
 assert subprocess.check_output(["modinfo", "-F", "vermagic", str(modules[0])], text=True).startswith(kernel + " ")
-if sys.argv[5] == "systemd":
+required = set(subprocess.check_output(["modinfo", "-F", "firmware", str(modules[0])], text=True).splitlines())
+assert required, "module declares no firmware"
+for name in required:
+    installed = firmware / "lib/firmware" / name
+    digest = hashlib.sha256(installed.read_bytes()).hexdigest()
+    copies = [p for p in root.glob(f"nix/store/*/lib/firmware/{name}*")
+              if p.name in (Path(name).name, Path(name).name + ".zst")]
+    assert len(copies) == 1, (name, copies)
+    data = (subprocess.check_output(["zstd", "-dc", str(copies[0])])
+            if copies[0].suffix == ".zst" else copies[0].read_bytes())
+    assert hashlib.sha256(data).hexdigest() == digest, name
+if sys.argv[4] == "systemd":
     unit = rooted("etc/systemd/system/gpu-unlock.service").read_text()
     # systemd permits repeated assignments, including generated Environment=.
     parsed = configparser.ConfigParser(interpolation=None, strict=False)

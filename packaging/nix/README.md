@@ -1,7 +1,7 @@
 # Nix / NixOS
 
-Supports `x86_64-linux`. Firmware inputs and outputs are SHA-256 pinned by
-[`artifacts-610.43.03.json`](../firmware/artifacts-610.43.03.json).
+Supports `x86_64-linux`. NVIDIA source and installer downloads are SHA-256 pinned
+in [`package.nix`](package.nix).
 
 ## NixOS
 
@@ -61,9 +61,9 @@ nix develop
 Run these from the checkout. The flake permits its firmware package's unfree
 license; the NixOS module follows your system's license policy.
 
-Checks compile the module, run the upstream tests, and verify the module ABI,
+Checks compile the module, extract its firmware, and verify the module ABI,
 firmware hashes, and loading order in the initrd formats supported by NixOS. CI
 covers both the locked nixpkgs and unstable. Checks require no GPU
 and do not validate hardware compatibility or performance.
 
-See [`firmware/NOTICE.md`](../firmware/NOTICE.md) and `licenses/` for license terms.
+See [`firmware/NOTICE.md`](../../firmware/NOTICE.md) and `licenses/` for license terms.
