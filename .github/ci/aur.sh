@@ -39,6 +39,8 @@ for build in /usr/lib/modules/*/build; do
     kernel=${build%/build}
     kernel=${kernel##*/}
     dkms install -m gpu-unlock -v "$version" -k "$kernel"
+    # Headers-only containers may not have a module index yet.
+    depmod -a "$kernel"
     test "$(modinfo -k "$kernel" -F name gpu_unlock)" = gpu_unlock
     tested_kernel=$kernel
 done
