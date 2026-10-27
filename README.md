@@ -84,6 +84,8 @@ users have filed, where you can find full benchmark details and post your own.
 
 ## How to install
 
+For Nix/NixOS, see [packaging/nix/README.md](packaging/nix/README.md).
+
 First run:
 
 ```sh

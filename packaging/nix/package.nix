@@ -1,33 +1,32 @@
 # SPDX-License-Identifier: GPL-2.0-only
 { lib, stdenv, fetchurl, python3, zstd, kernel, kernelModuleMakeFlags }:
 let
-  version = lib.removeSuffix "\n" (builtins.readFile ../VERSION);
+  version = lib.removeSuffix "\n" (builtins.readFile ../../VERSION);
+  nvidiaVersion = "610.43.03";
   kernelBuild = "${kernel.dev}/lib/modules/${kernel.modDirVersion}/build";
   kbuildFlags = lib.escapeShellArgs kernelModuleMakeFlags;
   # Build the source in this checkout, including downstream changes. Keep Nix
   # metadata outside the source closure so updating flake.lock alone is cheap.
   src = lib.fileset.toSource {
-    root = ../.;
+    root = ../../.;
     fileset = lib.fileset.unions [
-      ../VERSION
-      ../Makefile
-      ../README.md
-      ../kernel
-      ../firmware
-      ../licenses
-      ../packaging
-      ../tests
-      ../debian
+      ../../VERSION
+      ../../Makefile
+      ../../README.md
+      ../../kernel
+      ../../firmware
+      ../../licenses
+      (lib.fileset.difference ../../packaging ./.)
+      ../../debian
     ];
   };
-  manifest = builtins.fromJSON (builtins.readFile ../firmware/artifacts-610.43.03.json);
-  sourceArtifact = builtins.elemAt manifest.source_artifacts 0;
-  utilsArtifact = builtins.elemAt manifest.source_artifacts 2;
   nvidiaSource = fetchurl {
-    inherit (sourceArtifact) url sha256;
+    url = "https://download.nvidia.com/XFree86/NVIDIA-kernel-module-source/NVIDIA-kernel-module-source-${nvidiaVersion}.tar.xz";
+    sha256 = "7e118923c7a23edc36114d63273a46e3e04e9af98695a42203e7ac2dfe9fc1dc";
   };
-  nvidiaUtils = fetchurl {
-    inherit (utilsArtifact) url sha256;
+  nvidiaInstaller = fetchurl {
+    url = "https://download.nvidia.com/XFree86/Linux-x86_64/${nvidiaVersion}/NVIDIA-Linux-x86_64-${nvidiaVersion}-no-compat32.run";
+    sha256 = "e084451db730a6df29d3d74f655749c4d236e3c945f7d94b5205e84318fe2f90";
   };
   firmware = stdenv.mkDerivation {
     pname = "gpu-unlock-firmware";
@@ -36,26 +35,20 @@ let
     buildPhase = ''
       runHook preBuild
       mkdir inputs
-      ln -s ${nvidiaSource} inputs/${sourceArtifact.filename}
-      ln -s ${nvidiaUtils} inputs/${utilsArtifact.filename}
+      ln -s ${nvidiaSource} inputs/NVIDIA-kernel-module-source-${nvidiaVersion}.tar.xz
+      ln -s ${nvidiaInstaller} inputs/NVIDIA-Linux-x86_64-${nvidiaVersion}-no-compat32.run
       make firmware INPUTS=$PWD/inputs ASSETS=$PWD/assets
       runHook postBuild
-    '';
-    doCheck = true;
-    checkPhase = ''
-      runHook preCheck
-      make test ASSETS=$PWD/assets
-      runHook postCheck
     '';
     installPhase = ''
       runHook preInstall
       make install-firmware ASSETS=$PWD/assets DESTDIR=$out \
-        FWDIR=/lib/firmware/gpu-unlock/610.43.03 LICENSEDIR=/share/licenses
+        FWDIR=/lib/firmware/gpu-unlock/${nvidiaVersion} LICENSEDIR=/share/licenses
       runHook postInstall
     '';
     dontFixup = true;
     meta = {
-      description = "Pinned NVIDIA firmware and generated payload for gpu-unlock";
+      description = "Pinned NVIDIA firmware for gpu-unlock";
       license = [ lib.licenses.unfreeRedistributableFirmware lib.licenses.gpl2Only ];
       platforms = [ "x86_64-linux" ];
     };

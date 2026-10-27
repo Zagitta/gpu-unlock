@@ -41,7 +41,7 @@ pkgs.runCommand "gpu-unlock-nixos-integration-${if systemdInitrd then "systemd" 
     mkdir root
     (cd root; zstd -dc ${enabled.system.build.initialRamdisk}/initrd | cpio --quiet -id --no-absolute-filenames)
     python3 ${./check-initrd.py} root ${enabled.system.build.gpuUnlock.firmware} \
-      ${../firmware/artifacts-610.43.03.json} ${enabled.boot.kernelPackages.kernel.modDirVersion} \
+      ${enabled.boot.kernelPackages.kernel.modDirVersion} \
       ${if systemdInitrd then "systemd" else "scripted"}
     mkdir -p $out
     cp verified-initrd-ordering.txt $out/

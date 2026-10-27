@@ -11,7 +11,7 @@
         # Only the explicitly requested firmware package needs this exception.
         config.allowUnfreePredicate = pkg: nixpkgs.lib.getName pkg == "gpu-unlock-firmware";
       };
-      module = pkgs.linuxPackages.callPackage ./nix/package.nix { };
+      module = pkgs.linuxPackages.callPackage ./packaging/nix/package.nix { };
       nixosOptions = (nixpkgs.lib.nixosSystem {
         inherit system;
         modules = [{ nixpkgs.pkgs = pkgs; }];
@@ -25,15 +25,15 @@
         gpu-unlock-firmware = module.firmware;
       };
 
-      nixosModules.default = ./nix/module.nix;
+      nixosModules.default = ./packaging/nix/module.nix;
       nixosModules.gpu-unlock = self.nixosModules.default;
 
       checks.${system} = {
         kernel-module = module;
         firmware = module.firmware;
-        nixos-integration = import ./nix/checks.nix { inherit pkgs nixpkgs; };
+        nixos-integration = import ./packaging/nix/checks.nix { inherit pkgs nixpkgs; };
       } // nixpkgs.lib.optionalAttrs hasScriptedInitrd {
-        nixos-integration-scripted = import ./nix/checks.nix {
+        nixos-integration-scripted = import ./packaging/nix/checks.nix {
           inherit pkgs nixpkgs;
           systemdInitrd = false;
         };
