@@ -25,3 +25,4 @@
 /debian/gpu-unlock-*/
 modules.order
 Module.symvers
+packaging/*/NVIDIA-Linux-x86_64-610.43.03-no-compat32.run

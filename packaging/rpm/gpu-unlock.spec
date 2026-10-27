@@ -1,14 +1,14 @@
 %global nv 610.43.03
 
 Name: gpu-unlock
-Version: 1.0.0
+Version: 1.1.0
 Release: 1%{?dist}
 Summary: RTX 3090 BF16 unlock before the NVIDIA driver loads
 License: GPL-2.0-only
 BuildArch: noarch
 Source0: gpu-unlock-%{version}.tar.xz
 Source1: https://download.nvidia.com/XFree86/NVIDIA-kernel-module-source/NVIDIA-kernel-module-source-%{nv}.tar.xz
-Source2: https://archive.cachyos.org/archive/cachyos-v3/nvidia-utils-%{nv}-1-x86_64_v3.pkg.tar.zst
+Source2: https://download.nvidia.com/XFree86/Linux-x86_64/%{nv}/NVIDIA-Linux-x86_64-%{nv}-no-compat32.run
 # NVIDIA inputs stay out of the source RPM (it becomes a .nosrc.rpm).
 NoSource: 1
 NoSource: 2
@@ -42,16 +42,13 @@ Firmware assets generated locally from verified upstream inputs.
 %prep
 sha256sum -c - <<EOF
 7e118923c7a23edc36114d63273a46e3e04e9af98695a42203e7ac2dfe9fc1dc  %{SOURCE1}
-e17e7c92eeffa178b0fe1f40eb17a47095f8fc3ce4a77bf115cf5bd5a4df86e9  %{SOURCE2}
+e084451db730a6df29d3d74f655749c4d236e3c945f7d94b5205e84318fe2f90  %{SOURCE2}
 EOF
 %autosetup
 test "$(cat VERSION)" = "%{version}"
 
 %build
 %make_build INPUTS=%{_sourcedir} ASSETS="$PWD/assets" firmware
-
-%check
-make test ASSETS="$PWD/assets"
 
 %install
 make DESTDIR=%{buildroot} ASSETS="$PWD/assets" \
@@ -131,5 +128,5 @@ if [ "$1" -eq 0 ]; then
 fi
 
 %changelog
-* Mon Sep 28 2026 Zagitta <zetlon+github@gmail.com> - 1.0.0-1
+* Mon Sep 28 2026 Zagitta <zetlon+github@gmail.com> - 1.1.0-1
 - Initial release.

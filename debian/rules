@@ -15,9 +15,6 @@ override_dh_auto_configure:
 override_dh_auto_build:
 	$(MAKE) INPUTS="$(GPU_UNLOCK_INPUTS)" ASSETS="$(ASSETS)" firmware
 
-override_dh_auto_test:
-	$(MAKE) test ASSETS="$(ASSETS)"
-
 override_dh_auto_install:
 	$(MAKE) DESTDIR=$(CURDIR)/debian/tmp ASSETS="$(ASSETS)" \
-		install-dkms install-firmware install-initramfs-tools
+		install-dkms install-firmware install-initramfs-tools install-dracut

@@ -1,41 +1,45 @@
 # SPDX-License-Identifier: GPL-2.0-only
-# Builds from the committed HEAD of the checkout this file lives in:
+# Builds the working tree of the checkout this file lives in, uncommitted
+# changes included. snapshot.sh publishes that tree; the git source is pinned
+# to it. An unpinned source checks out the mirror's origin/HEAD, which stays
+# on the branch the mirror was first cloned from.
 #   cd packaging/arch && makepkg -si
 # For a published release, point the first source at the tagged tarball.
 pkgbase=gpu-unlock
 pkgname=(gpu-unlock-dkms gpu-unlock-firmware)
-pkgver=1.0.0
+pkgver=1.1.0
 pkgrel=1
 _nv=610.43.03
-_utils=nvidia-utils-$_nv-1-x86_64_v3.pkg.tar.zst
-pkgdesc='RTX 3090 BF16 unlock before the NVIDIA driver loads'
+_installer=NVIDIA-Linux-x86_64-$_nv-no-compat32.run
+pkgdesc='Ampere pre-driver hardware unlock'
 arch=('x86_64')
 url=''
 license=('GPL-2.0-only')
-makedepends=('git' 'python' 'zstd')
+makedepends=('git' 'python' 'zstd' 'openssl')
 options=('!strip' '!debug')
-source=("$pkgbase::git+file://${startdir%/packaging/arch}"
+_root=${startdir%/packaging/arch}
+_commit=$("$_root/packaging/snapshot.sh")
+source=("$pkgbase::git+file://${_root}#commit=${_commit}"
         "https://download.nvidia.com/XFree86/NVIDIA-kernel-module-source/NVIDIA-kernel-module-source-$_nv.tar.xz"
-        "https://archive.cachyos.org/archive/cachyos-v3/$_utils")
-noextract=("$_utils")
+        "https://download.nvidia.com/XFree86/Linux-x86_64/$_nv/$_installer")
 sha256sums=('SKIP'
             '7e118923c7a23edc36114d63273a46e3e04e9af98695a42203e7ac2dfe9fc1dc'
-            'e17e7c92eeffa178b0fe1f40eb17a47095f8fc3ce4a77bf115cf5bd5a4df86e9')
+            'e084451db730a6df29d3d74f655749c4d236e3c945f7d94b5205e84318fe2f90')
 
 prepare() {
   cd $pkgbase
-  test "$(cat VERSION)" = "$pkgver"
+  got=$(cat VERSION)
+  [ "$got" = "$pkgver" ] || {
+    printf 'VERSION is %s, pkgver is %s (checked out %s)\n' \
+      "$got" "$pkgver" "$(git rev-parse --short HEAD)" >&2
+    return 1
+  }
 }
 
 build() {
   cd $pkgbase
-  python firmware/generate_v67.py "$(realpath "$srcdir/$_utils")" "$srcdir/assets"
+  python firmware/extract_gsp.py "$(realpath "$srcdir/$_installer")" "$srcdir/assets"
   python firmware/extract_boot_assets.py "$srcdir/NVIDIA-kernel-module-source-$_nv" "$srcdir/assets"
-}
-
-check() {
-  cd $pkgbase
-  make test ASSETS="$srcdir/assets"
 }
 
 package_gpu-unlock-dkms() {
@@ -46,7 +50,7 @@ package_gpu-unlock-dkms() {
   replaces=('gpu-unlock-mkinitcpio')
   install=gpu-unlock.install
   cd $pkgbase
-  make DESTDIR="$pkgdir" install-dkms install-mkinitcpio
+  make DESTDIR="$pkgdir" install-dkms install-mkinitcpio install-dracut
   make DESTDIR="$pkgdir" PKG=$pkgname install-licenses
 }
 

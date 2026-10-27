@@ -1,19 +1,20 @@
 # Pinned 610.43.03 firmware
 
-`make inputs` runs `fetch_artifacts.py`, which downloads the NVIDIA open kernel
-module source archive and the exact CachyOS `nvidia-utils` package pinned in
-`artifacts-610.43.03.json`. Downloads use HTTPS and are checked against their
-SHA-256 before they enter the cache; cached files are rechecked on every run.
-Nothing downloaded is executed or installed.
+`make inputs` downloads the two NVIDIA inputs into the cache.
+`make firmware` runs `extract_gsp.py` for the two GSP ELFs and the NVIDIA
+license, and `extract_boot_assets.py` for the signed SEC2 Booter bundles,
+generic Falcon loader, and per-family GSP boot images/descriptors.
+Extracted NVIDIA bytes are unchanged.
 
-`make firmware` then builds the five files the kernel module loads from
-`gpu-unlock/610.43.03/`:
+The payload is ordinary source code: the V67 call table in
+`kernel/gpu_unlock/recipes.c`, built per write by `payload.c`. There is no
+generator, no external `dmem.bin` override, and no reference image on disk.
 
-- `generate_v67.py` extracts `gsp_ga10x.bin` and the NVIDIA license from the
-  package and generates the 64,000-byte `v67-ga102-610.43.03.bin`.
-- `extract_boot_assets.py` builds `booter_load_ga102.bin`,
-  `gsp_boot_ga102.bin` and `gsp_boot_desc_ga102.bin` from the source archive.
+The SEC2 Booter executes on Falcon and loads the separate GSP boot image.
+GA100 uses `gsp_tu10x.bin` with `.fwsignature_ga100`; GA10x uses
+`gsp_ga10x.bin` with `.fwsignature_ga10x`. The selected card determines its
+GSP assets once, separately from register tables. All new hardware contexts
+remain experimental; see [Stage 1 evidence](../docs/STAGE1.md).
 
-Both scripts check every input and output against its pinned SHA-256 before
-writing anything. Python 3.14+ is required for zstd tar support. See
-[NOTICE.md](NOTICE.md) for provenance and licensing.
+Python 3, zstd, and the pinned inputs are sufficient for extraction.
+See [NOTICE.md](NOTICE.md) for provenance and licensing.

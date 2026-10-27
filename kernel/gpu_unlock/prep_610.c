@@ -256,11 +256,11 @@ int gpu_unlock_wpr_meta_pack(u8 out[GU_WPR_META_SIZE],
 	return 0;
 }
 
-u32 gpu_unlock_dma_cmd(bool imem)
+u32 gpu_unlock_dma_cmd(bool imem, bool secure)
 {
 	u32 cmd = 6u << 8;
 
 	if (imem)
-		cmd |= (1u << 4) | (1u << 2);
+		cmd |= (1u << 4) | (secure ? (1u << 2) : 0);
 	return cmd;
 }

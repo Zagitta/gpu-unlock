@@ -14,37 +14,35 @@ PKG        ?= gpu-unlock
 
 MODULE_FILES   := $(filter-out %.mod.c,$(sort $(wildcard kernel/gpu_unlock/*.[ch]))) \
                   kernel/gpu_unlock/Kbuild kernel/gpu_unlock/Makefile kernel/gpu_unlock/dkms.conf
-FIRMWARE_FILES := booter_load_ga102.bin gsp_ga10x.bin gsp_boot_ga102.bin \
-                  gsp_boot_desc_ga102.bin v67-ga102-$(NV).bin
+FIRMWARE_FILES := booter_load_ad102.bin booter_load_ga102.bin gsp_boot_ad102.bin gsp_boot_desc_ad102.bin \
+                  booter_load_ga100.bin falcon_loader.bin gsp_ga10x.bin gsp_tu10x.bin \
+                  gsp_boot_ga102.bin gsp_boot_desc_ga102.bin \
+                  gsp_boot_ga100.bin gsp_boot_desc_ga100.bin
 LICENSES       := licenses/GPL-2.0.txt licenses/CMP40HX-MIT.txt licenses/NVIDIA-MIT.txt
 NV_SOURCE      := NVIDIA-kernel-module-source-$(NV)
-NV_UTILS       := nvidia-utils-$(NV)-1-x86_64_v3.pkg.tar.zst
+NV_INSTALLER   := NVIDIA-Linux-x86_64-$(NV)-no-compat32.run
 
 TARBALL := $(abspath $(DISTDIR))/gpu-unlock-$(VERSION).tar.xz
 DEBDIR  := $(abspath $(DISTDIR))/deb
 RPMDIR  := $(abspath $(DISTDIR))/rpm
 DEBS    := $(foreach p,dkms firmware,$(DEBDIR)/gpu-unlock-$(p)_$(VERSION)_all.deb)
 
-.PHONY: all test dist inputs firmware assets install-dkms install-firmware \
+.PHONY: all dist inputs firmware assets install-dkms install-firmware \
         install-mkinitcpio install-initramfs-tools install-dracut \
-        install-licenses arch deb rpm install install-arch install-deb install-rpm
+        install-licenses arch deb rpm install install-arch install-deb install-rpm \
+        test-module test-packages
 
 all:
-
-# With generated or installed firmware, the tests also run the whole unlock
-# against mocked hardware.
-test:
-	GPU_UNLOCK_ASSETS=$(ASSETS) $(PYTHON) -m unittest discover -s tests -v
 
 # Source-only release tarball; see .gitattributes for what is left out.
 dist:
 	mkdir -p $(DISTDIR)
 	git archive --format=tar --prefix=gpu-unlock-$(VERSION)/ \
-		--output=$(DISTDIR)/gpu-unlock-$(VERSION).tar HEAD
+		--output=$(DISTDIR)/gpu-unlock-$(VERSION).tar $$(packaging/snapshot.sh)
 	xz -9 -f $(DISTDIR)/gpu-unlock-$(VERSION).tar
 
-# Download and SHA-256 check the pinned NVIDIA inputs. makepkg does this
-# itself from the PKGBUILD's source array.
+# Download the NVIDIA inputs. makepkg does this itself from the PKGBUILD's
+# source array.
 inputs:
 	$(PYTHON) firmware/fetch_artifacts.py $(INPUTS)
 
@@ -54,7 +52,7 @@ firmware:
 	rm -rf $(ASSETS).src
 	mkdir -p $(ASSETS).src
 	tar -xf $(INPUTS)/$(NV_SOURCE).tar.xz -C $(ASSETS).src
-	$(PYTHON) firmware/generate_v67.py "$$(realpath $(INPUTS)/$(NV_UTILS))" $(ASSETS)
+	$(PYTHON) firmware/extract_gsp.py "$$(realpath $(INPUTS)/$(NV_INSTALLER))" $(ASSETS)
 	$(PYTHON) firmware/extract_boot_assets.py $(ASSETS).src/$(NV_SOURCE) $(ASSETS)
 
 assets: inputs
@@ -68,13 +66,12 @@ install-dkms:
 	install -Dm644 -t $(DESTDIR)$(DKMSDIR) $(MODULE_FILES)
 	install -Dm644 README.md $(DESTDIR)/usr/share/doc/gpu-unlock/README.md
 
-# The generators check every file against its pinned SHA-256 before writing it.
 install-firmware:
 	install -Dm644 -t $(DESTDIR)$(FWDIR) $(addprefix $(ASSETS)/,$(FIRMWARE_FILES))
 	install -Dm644 $(ASSETS)/NVIDIA-LICENSE $(DESTDIR)$(LICENSEDIR)/gpu-unlock-firmware/NVIDIA-LICENSE
 	install -Dm644 firmware/NOTICE.md $(DESTDIR)$(LICENSEDIR)/gpu-unlock-firmware/NOTICE.md
 
-# One file per initramfs generator: include gpu_unlock and its firmware in
+# Per initramfs generator: include gpu_unlock and its firmware in
 # the image so it runs before an nvidia module loaded from the initramfs.
 install-mkinitcpio:
 	install -Dm644 packaging/boot/mkinitcpio.conf $(DESTDIR)/etc/mkinitcpio.conf.d/zz-gpu-unlock.conf
@@ -82,6 +79,8 @@ install-mkinitcpio:
 install-initramfs-tools:
 	install -Dm644 packaging/boot/initramfs-tools.conf \
 		$(DESTDIR)/usr/share/initramfs-tools/modules.d/gpu-unlock.conf
+	install -Dm755 packaging/boot/initramfs-tools-init-top \
+		$(DESTDIR)/usr/share/initramfs-tools/scripts/init-top/gpu-unlock
 
 install-dracut:
 	install -Dm644 packaging/boot/dracut.conf $(DESTDIR)/usr/lib/dracut/dracut.conf.d/gpu-unlock.conf
@@ -89,7 +88,7 @@ install-dracut:
 install-licenses:
 	install -Dm644 -t $(DESTDIR)$(LICENSEDIR)/$(PKG) $(LICENSES)
 
-# Native packages, built from the committed HEAD like the PKGBUILD. The
+# Native packages, built from the working tree like the PKGBUILD. The
 # install-* variants also pull build dependencies and install the result.
 install:
 	@set -eu; \
@@ -134,7 +133,7 @@ rpm: dist inputs
 	rm -rf $(RPMDIR)
 	mkdir -p $(RPMDIR)/SOURCES
 	cp $(TARBALL) $(RPMDIR)/SOURCES/
-	ln -s $(abspath $(INPUTS))/$(NV_SOURCE).tar.xz $(abspath $(INPUTS))/$(NV_UTILS) $(RPMDIR)/SOURCES/
+	ln -s $(abspath $(INPUTS))/$(NV_SOURCE).tar.xz $(abspath $(INPUTS))/$(NV_INSTALLER) $(RPMDIR)/SOURCES/
 	rpmbuild -ba --define "_topdir $(RPMDIR)" packaging/rpm/gpu-unlock.spec
 
 install-rpm:
@@ -142,3 +141,11 @@ install-rpm:
 	sudo dnf builddep -y packaging/rpm/gpu-unlock.spec
 	$(MAKE) rpm
 	sudo dnf install -y $(RPMDIR)/RPMS/noarch/gpu-unlock-*-$(VERSION)-*.noarch.rpm
+
+# Build the module, or build, install and remove the packages, in a
+# container of each distribution.
+test-module:
+	tests/docker.sh module
+
+test-packages:
+	INPUTS=$(INPUTS) tests/docker.sh package

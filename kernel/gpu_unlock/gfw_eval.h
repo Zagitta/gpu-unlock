@@ -2,6 +2,8 @@
 #ifndef GPU_UNLOCK_GFW_EVAL_H
 #define GPU_UNLOCK_GFW_EVAL_H
 
+#include "registers.h"
+
 #ifdef __KERNEL__
 #include <linux/types.h>
 #else
@@ -16,13 +18,7 @@ typedef uint32_t u32;
  * dev_gc6_island.h, dev_gc6_island_addendum.h, dev_gsp.h, dev_falcon_v4.h.
  * GFW completion uses kflcnWaitForHalt_TU102 (Falcon CPUCTL), not RISC-V CPUCTL.
  */
-#define GU_GFW_PLM_OFFSET 0x00118128u
-#define GU_GFW_BOOT_OFFSET 0x00118234u
-#define GU_GFW_CPUCTL_OFFSET 0x00110100u
 #define GU_GFW_TIMEOUT_US 2050000u
-#define GU_FEAT_PLM_OFFSET 0x00823804u
-#define GU_FEAT_SS0_OFFSET 0x0082381cu
-#define GU_FEAT_SS1_OFFSET 0x00823820u
 #define GU_GFW_PLM_LEVEL0 0x1u
 #define GU_GFW_BOOT_COMPLETED 0xffu
 #define GU_GFW_CPUCTL_HALTED 0x10u
