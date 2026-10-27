@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: GPL-2.0-only
+name: AUR validation
+
+on:
+  pull_request:
+    paths:
+      - packaging/aur/**
+      - .github/ci/aur.sh
+      - .github/workflows/aur.yml
+      - .github/workflows/aur-publish.yml
+      - .github/ci/aur-publish.sh
+      - tests/packaging/test_aur_publish.py
+  push:
+    branches: [main]
+    paths:
+      - packaging/aur/**
+      - .github/ci/aur.sh
+      - .github/workflows/aur.yml
+      - .github/workflows/aur-publish.yml
+      - .github/ci/aur-publish.sh
+      - tests/packaging/test_aur_publish.py
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    container: archlinux:latest
+    timeout-minutes: 30
+    steps:
+      # Install git before checkout; GitHub archives omit .github via export-ignore.
+      - name: Install build dependencies
+        run: pacman -Syu --noconfirm --needed base-devel git python zstd dkms linux-headers
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Test AUR publication safeguards
+        run: python tests/packaging/test_aur_publish.py
+      - name: Build, install and remove the standalone AUR packages
+        run: sh .github/ci/aur.sh
