@@ -420,8 +420,10 @@ static int unlock_transaction_unwind(struct unlock_transaction_work *work)
 		return GU_RESULT(-EIO);
 	/* nvidia does not set BME again on resume. pci_clear_master() before the
 	 * FLR also cleared the PCI core's record of it; set both back. */
-	if (work->resume && (want & PCI_COMMAND_MASTER))
+	if (work->resume && (want & PCI_COMMAND_MASTER)) {
 		pci_set_master(work->pdev);
+		pci_save_state(work->pdev);
+	}
 	if (diag_pci_word(work, false, PCI_COMMAND, &now))
 		return GU_RESULT(-EIO);
 	dev_dbg(&work->pdev->dev, "restore PCI command: actual=%#x original=%#x mask=%#x\n",
@@ -1002,9 +1004,6 @@ static int unlock_transaction_suspended(struct unlock_transaction_work *work)
 		return GU_RESULT(-EIO);
 	dev_dbg(&work->pdev->dev, "resume entry: wpr2_hi=%#x ss0=%#x ss1=%#x\n",
 		 wpr_hi, ss0, ss1);
-	dev_info(&work->pdev->dev,
-		 "gpu_unlock: stage=resume-entry wpr2_hi=%#x ss0=%#x ss1=%#x cmd=%#x\n",
-		 wpr_hi, ss0, ss1, command);
 	if (!inaccessible(wpr_hi) && (wpr_hi >> 4)) {
 		dev_dbg(&work->pdev->dev, "resume: GSP-RM already running (WPR2 enabled); card left as is\n");
 		return -EBUSY;
@@ -1012,6 +1011,9 @@ static int unlock_transaction_suspended(struct unlock_transaction_work *work)
 	/* Sleep that kept the card powered (suspend to idle, an aborted suspend). */
 	if (ss0 == GU_SS0_UNLOCK && ss1 == GU_SS1_UNLOCK)
 		return -EALREADY;
+	dev_info(&work->pdev->dev,
+		 "gpu_unlock: stage=resume-entry wpr2_hi=%#x ss0=%#x ss1=%#x cmd=%#x\n",
+		 wpr_hi, ss0, ss1, command);
 	return unlock_transaction_gfw(work);
 }
 
@@ -1614,6 +1616,14 @@ int gpu_unlock_610_unlock(const struct gu_device *device, const struct gpu_unloc
 		ret = check_devres_empty(work, "entry");
 	if (!ret)
 		ret = unlock_transaction_claim(work);
+	if (!ret && !resume) {
+		u32 ss0 = 0, ss1 = 0;
+
+		if (!read_bar(work, work->card->family->feat_ss0, &ss0) &&
+		    !read_bar(work, work->card->family->feat_ss1, &ss1) &&
+		    ss0 == GU_SS0_UNLOCK && ss1 == GU_SS1_UNLOCK)
+			ret = -EALREADY;
+	}
 	if (!ret) {
 		u32 chip;
 		if (read_bar(work, GU_PMC_BOOT_0_OFFSET, &chip) || inaccessible(chip) ||
@@ -1651,16 +1661,22 @@ int gpu_unlock_610_unlock(const struct gu_device *device, const struct gpu_unloc
 	cleanup = unlock_transaction_unwind(work);
 	if (!ret)
 		ret = cleanup;
-	dev_info(&pdev->dev,
-		 "gpu_unlock: stage=handoff ret=%d state=%u retained=%u pages=%u/%u cleanup=%d\n",
-		 ret, work->state, work->retained, work->pages_allocated,
-		 work->page_count, cleanup);
+	if (ret == -EALREADY)
+		dev_dbg(&pdev->dev,
+			"gpu_unlock: stage=handoff ret=%d state=%u retained=%u pages=%u/%u cleanup=%d\n",
+			ret, work->state, work->retained, work->pages_allocated,
+			work->page_count, cleanup);
+	else
+		dev_info(&pdev->dev,
+			 "gpu_unlock: stage=handoff ret=%d state=%u retained=%u pages=%u/%u cleanup=%d\n",
+			 ret, work->state, work->retained, work->pages_allocated,
+			 work->page_count, cleanup);
 	if (work->retained) {
 		/* Firmware may still DMA into these buffers: keep them, the device
 		 * reference and this module until the next power off. */
 		dev_err(&pdev->dev, "firmware did not stop; keeping its DMA buffers until power off\n");
 		__module_get(THIS_MODULE);
-		return ret;
+		return -EHWPOISON;
 	}
 	pci_dev_put(work->pdev);
 	kfree(work);
