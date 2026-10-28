@@ -211,17 +211,32 @@ over.
 Loading the module by hand after boot does nothing to a card that `nvidia`
 has bound.
 
-Suspend to RAM powers the cards off, which resets the speed selectors. After
-resume the module unlocks every card it unlocked at boot again, before
-`nvidia` resumes it: its suspend notifier runs just ahead of the one `nvidia`
-resumes its cards from (`NVreg_UseKernelSuspendNotifiers=1`, the default in
-current drivers; `nvidia-resume.service` runs later still). This adds about a
-second to resume. A card that kept power, as in suspend to idle, is still
-unlocked and is only read. A card that `nvidia` has already resumed, or that is
-bound to another driver, is left as it is, and the log says why. Add
-`gpu_unlock.resume=0` to the kernel command line, or write `0` to
-`/sys/module/gpu_unlock/parameters/resume`, to turn this off. Hibernation is
-not covered.
+Suspend to RAM, hibernate, and fine-grained PCIe runtime power management
+(`NVreg_DynamicPowerManagement=0x02`, where idle cards enter `D3cold`) power
+the cards off, which resets the speed selectors. The module keeps the card
+unlocked across all of these transitions:
+
+- **PCIe Runtime PM (`D3cold -> D0`):** When `nvidia` binds a target card, the
+  module wraps its `dev_pm_ops` (`runtime_resume`, `resume`, `restore`, `thaw`)
+  and unlocks the card right after the PCI core restores `PCI_D0` and BARs and
+  before `nvidia` boots GSP-RM. Cards that remained in `D3hot` (retaining power)
+  are detected in microseconds via `FEAT_SS0`/`FEAT_SS1` readback (`-EALREADY`).
+- **PCI Hotplug / Dynamic Remove & Rescan:** A `pci_bus_type` notifier tracks
+  `BUS_NOTIFY_ADD_DEVICE`, `BUS_NOTIFY_DEL_DEVICE`, `BUS_NOTIFY_BIND_DRIVER`,
+  and `BUS_NOTIFY_UNBIND_DRIVER` / `BUS_NOTIFY_UNBOUND_DRIVER`, so cards powered
+  down via `/sys/bus/pci/devices/.../remove` and later rescanned are unlocked
+  automatically before `nvidia` probes them.
+- **System Suspend & Hibernate:** After system resume, cards that were active in
+  `D0` are unlocked before `nvidia` resumes them, while cards that stayed
+  runtime-suspended in `D3cold` across system sleep are left asleep until their
+  next runtime wakeup.
+
+Add `gpu_unlock.resume=0` or `gpu_unlock.runtime_unlock=0` to the kernel
+command line (or write `0` to `/sys/module/gpu_unlock/parameters/resume` or
+`runtime_unlock`) to disable system-resume or runtime-PM re-unlocking.
+Read-only status counters (`unlock_count`, `last_ss0`, `last_ss1`, `last_error`)
+are exposed under `/sys/module/gpu_unlock/parameters/` so monitoring tools can
+query unlock state without waking a card from `D3cold`.
 
 Check the result with:
 

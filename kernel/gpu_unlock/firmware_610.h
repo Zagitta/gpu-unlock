@@ -27,8 +27,8 @@ struct gpu_unlock_610_booter {
 	struct gpu_unlock_booter_hdr hdr;
 };
 
-#define GU_SHARED_BUNDLES 3
-#define GU_SHARED_BOOTERS 3
+#define GU_SHARED_BUNDLES 4
+#define GU_SHARED_BOOTERS 4
 
 /* One coordination round. Bundles and Booters are interned by descriptor
  * pointer, so families that share a Booter load it once. */
