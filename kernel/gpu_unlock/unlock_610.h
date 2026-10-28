@@ -7,11 +7,12 @@
 /*
  * Run the selected family recipe on a cold, unbound supported card, or one nvidia suspended
  * before a suspend to RAM and resumes after this returns. The caller holds
- * pci_dev_lock and supplies the context resolved during enumeration. Returns
- * 0 when the card is unlocked and handed back as found;
+ * pci_dev_lock or device_lock and supplies the context resolved during
+ * enumeration. Returns 0 when the card is unlocked and handed back as found;
  * otherwise a negative errno. A failed transaction may have applied a prefix
  * of the table: it must not be reported as ready. If quiescence cannot be
- * established, DMA buffers and BAR ownership are retained until power off.
+ * established, DMA buffers and BAR ownership are retained until power off
+ * and -EHWPOISON is returned: the card must not be unlocked again.
  * After resume,
  * -EALREADY means the card kept power and is still unlocked, and nothing was
  * written. Unlocks of different cards may run concurrently with the same

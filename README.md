@@ -234,9 +234,6 @@ unlocked across all of these transitions:
 Add `gpu_unlock.resume=0` or `gpu_unlock.runtime_unlock=0` to the kernel
 command line (or write `0` to `/sys/module/gpu_unlock/parameters/resume` or
 `runtime_unlock`) to disable system-resume or runtime-PM re-unlocking.
-Read-only status counters (`unlock_count`, `last_ss0`, `last_ss1`, `last_error`)
-are exposed under `/sys/module/gpu_unlock/parameters/` so monitoring tools can
-query unlock state without waking a card from `D3cold`.
 
 Check the result with:
 
