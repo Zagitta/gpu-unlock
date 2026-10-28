@@ -11,7 +11,6 @@
 #include <linux/pm_runtime.h>
 #include <linux/rwsem.h>
 #include <linux/slab.h>
-#include <linux/srcu.h>
 #include <linux/string.h>
 #include <linux/suspend.h>
 
@@ -47,7 +46,6 @@ static LIST_HEAD(cards);
 static DEFINE_MUTEX(cards_lock);
 static DECLARE_RWSEM(shared_sem);
 static DEFINE_MUTEX(pm_hook_lock);
-DEFINE_STATIC_SRCU(pm_hook_srcu);
 static ASYNC_DOMAIN_EXCLUSIVE(unlock_domain);
 static struct gpu_unlock_610_shared shared;
 static bool notifiers_registered;
@@ -173,6 +171,18 @@ static void remove_card_dev(struct pci_dev *pdev)
 	}
 }
 
+static bool shared_ready(const struct gu_device *dev)
+{
+	const struct gpu_unlock_610_firmware *slot;
+	bool ready;
+
+	down_read(&shared_sem);
+	slot = gpu_unlock_610_bundle_find(&shared, dev->recipe->family->fw);
+	ready = slot && slot->prepared && !slot->error;
+	up_read(&shared_sem);
+	return ready;
+}
+
 /* Load and cache the family firmware bundle in RAM across the module lifetime.
  * If an earlier attempt failed (e.g. before rootfs mount), reset the failed
  * slot so subsequent bind or runtime-resume hooks retry cleanly.
@@ -181,16 +191,11 @@ static int ensure_shared(const struct gu_device *dev)
 {
 	const struct gu_fw_desc *fw = dev->recipe->family->fw;
 	struct gpu_unlock_610_firmware *slot;
-	bool ready;
 	int ret;
 
 	/* Usually cached: skip the write lock, which would wait for every
 	 * unlock running on another card. */
-	down_read(&shared_sem);
-	slot = (struct gpu_unlock_610_firmware *)gpu_unlock_610_bundle_find(&shared, fw);
-	ready = slot && slot->prepared && !slot->error;
-	up_read(&shared_sem);
-	if (ready)
+	if (shared_ready(dev))
 		return 0;
 
 	down_write(&shared_sem);
@@ -296,8 +301,12 @@ static void unlock_cards(async_func_t fn)
 	struct card *card;
 
 	mutex_lock(&cards_lock);
+	list_for_each_entry(card, &cards, node)
+		ensure_shared(&card->device);
+	/* Schedule only after all families are prepared so no writer blocks
+	 * behind a running unlock's read lock. */
 	list_for_each_entry(card, &cards, node) {
-		if (!ensure_shared(&card->device)) {
+		if (shared_ready(&card->device)) {
 			kref_get(&card->ref);
 			async_schedule_domain(fn, card, &unlock_domain);
 		}
@@ -310,16 +319,15 @@ static void unlock_cards(async_func_t fn)
  * transitions the card from D3cold -> PCI_D0 and restores BARs/PCI_COMMAND,
  * and right before nv_pmops_runtime_resume() boots GSP-RM.
  *
- * Each wrapper runs inside pm_hook_srcu so remove_pm_hook() can wait for
- * callbacks already dispatched to it before dropping the module reference.
+ * Do not take pci_dev_lock(pdev) here: local_pci_probe() and
+ * __device_release_driver() call pm_runtime_get_sync(dev) while already
+ * holding device_lock(dev).
  */
 static int gu_pm_runtime_resume(struct device *dev)
 {
-	int idx = srcu_read_lock(&pm_hook_srcu);
 	const struct dev_pm_ops *ops = READ_ONCE(orig_pm_ops);
 	struct pci_dev *pdev = dev_is_pci(dev) ? to_pci_dev(dev) : NULL;
 	struct card *card;
-	int ret;
 
 	if (runtime_unlock && pdev && pci_get_drvdata(pdev)) {
 		card = find_card_get(pdev);
@@ -332,67 +340,7 @@ static int gu_pm_runtime_resume(struct device *dev)
 			put_card(card);
 		}
 	}
-	ret = ops && ops->runtime_resume ? ops->runtime_resume(dev) : 0;
-	srcu_read_unlock(&pm_hook_srcu, idx);
-	return ret;
-}
-
-/* Intercepts dpm_resume() (where device_resume() already holds device_lock(dev)
- * and pci_pm_resume() has restored PCI_D0) before nv_pmops_resume() runs.
- */
-static void gu_pm_system_resume_common(struct device *dev, const char *phase)
-{
-	struct pci_dev *pdev = dev_is_pci(dev) ? to_pci_dev(dev) : NULL;
-	struct card *card;
-
-	if (!resume || !pdev || !pci_get_drvdata(pdev) ||
-	    pm_runtime_status_suspended(dev) || pdev->current_state != PCI_D0)
-		return;
-	card = find_card_get(pdev);
-	if (card) {
-		if (READ_ONCE(card->driver_bound)) {
-			mutex_lock(&card->lock);
-			unlock_card(card, true, phase);
-			mutex_unlock(&card->lock);
-		}
-		put_card(card);
-	}
-}
-
-static int gu_pm_resume(struct device *dev)
-{
-	int idx = srcu_read_lock(&pm_hook_srcu);
-	const struct dev_pm_ops *ops = READ_ONCE(orig_pm_ops);
-	int ret;
-
-	gu_pm_system_resume_common(dev, "system resume");
-	ret = ops && ops->resume ? ops->resume(dev) : 0;
-	srcu_read_unlock(&pm_hook_srcu, idx);
-	return ret;
-}
-
-static int gu_pm_restore(struct device *dev)
-{
-	int idx = srcu_read_lock(&pm_hook_srcu);
-	const struct dev_pm_ops *ops = READ_ONCE(orig_pm_ops);
-	int ret;
-
-	gu_pm_system_resume_common(dev, "hibernate restore");
-	ret = ops && ops->restore ? ops->restore(dev) : 0;
-	srcu_read_unlock(&pm_hook_srcu, idx);
-	return ret;
-}
-
-static int gu_pm_thaw(struct device *dev)
-{
-	int idx = srcu_read_lock(&pm_hook_srcu);
-	const struct dev_pm_ops *ops = READ_ONCE(orig_pm_ops);
-	int ret;
-
-	gu_pm_system_resume_common(dev, "hibernate thaw");
-	ret = ops && ops->thaw ? ops->thaw(dev) : 0;
-	srcu_read_unlock(&pm_hook_srcu, idx);
-	return ret;
+	return ops && ops->runtime_resume ? ops->runtime_resume(dev) : 0;
 }
 
 static void install_pm_hook(struct device_driver *drv)
@@ -407,9 +355,6 @@ static void install_pm_hook(struct device_driver *drv)
 		hooked_drv = drv;
 		gu_pm_ops = *orig_pm_ops;
 		gu_pm_ops.runtime_resume = gu_pm_runtime_resume;
-		gu_pm_ops.resume = gu_pm_resume;
-		gu_pm_ops.restore = gu_pm_restore;
-		gu_pm_ops.thaw = gu_pm_thaw;
 		WRITE_ONCE(drv->pm, &gu_pm_ops);
 	}
 	mutex_unlock(&pm_hook_lock);
@@ -427,13 +372,10 @@ static void remove_pm_hook(void)
 		unhooked = true;
 	}
 	mutex_unlock(&pm_hook_lock);
-	if (!unhooked)
-		return;
-	/* orig_pm_ops stays set: a callback already dispatched to a wrapper must
-	 * still reach nvidia's own handler. Wait for those before letting the
-	 * module go. */
-	synchronize_srcu(&pm_hook_srcu);
-	module_put(THIS_MODULE);
+	/* orig_pm_ops stays set so any callback already in gu_pm_runtime_resume()
+	 * still reaches nvidia's handler. */
+	if (unhooked)
+		module_put(THIS_MODULE);
 }
 
 static int gpu_unlock_pci_notify(struct notifier_block *nb, unsigned long action, void *data)
@@ -465,6 +407,9 @@ static int gpu_unlock_pci_notify(struct notifier_block *nb, unsigned long action
 			if (runtime_unlock) {
 				/* really_probe() caller already holds device_lock(dev). */
 				mutex_lock(&card->lock);
+				if (pdev->current_state != PCI_D0 &&
+				    pdev->current_state != PCI_UNKNOWN)
+					pci_set_power_state(pdev, PCI_D0);
 				unlock_card(card, false, "bind");
 				mutex_unlock(&card->lock);
 			}
@@ -506,7 +451,7 @@ static struct notifier_block pci_nb = {
  * once this returns: every card must be finished by then. */
 static int gpu_unlock_pm_notify(struct notifier_block *nb, unsigned long event, void *unused)
 {
-	if (event == PM_POST_SUSPEND && resume)
+	if ((event == PM_POST_SUSPEND || event == PM_POST_HIBERNATION) && resume)
 		unlock_cards(unlock_again);
 	return NOTIFY_DONE;
 }
