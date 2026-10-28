@@ -1,13 +1,14 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-2.0-only
 # Load gpu_unlock for one card before nvidia binds it. Runs from the unpacked
-# bundle as an ExecStartPre of middlewared.service, which loads nvidia; GPU is
-# the card's PCI address as lspci -D prints it, set in the same drop-in.
+# bundle as an ExecStartPre of middlewared.service, which loads nvidia. The
+# argument is the card's PCI address as lspci -D prints it; one card only.
 # It never fails the boot: every problem is logged and it exits 0. It does
-# nothing when gpu_unlock.disable is on the kernel command line, GPU is unset,
-# the kernel differs from the one the module was built for, the card is
-# missing or already bound, or the bundle checksums do not match.
+# nothing when gpu_unlock.disable is on the kernel command line, no card is
+# given, the kernel differs from the one the module was built for, the card
+# is missing or already bound, or the bundle checksums do not match.
 DIR=$(dirname "$(readlink -f "$0")")
+GPU=${1:-}
 FWPATH=/sys/module/firmware_class/parameters/path
 
 log() { logger -s -t gpu-unlock "$*"; }
@@ -17,8 +18,8 @@ if grep -qw gpu_unlock.disable /proc/cmdline; then
 	log "gpu_unlock.disable on kernel command line: skipped"
 	exit 0
 fi
-if [ -z "${GPU:-}" ]; then
-	log "GPU (PCI address of the card) not set: skipped"
+if [ -z "$GPU" ]; then
+	log "no card PCI address given: skipped"
 	exit 0
 fi
 if [ "$(uname -r)" != "$(cat "$DIR/KERNEL")" ]; then
@@ -47,8 +48,9 @@ old=$(cat "$FWPATH")
 printf '%s' "$DIR/firmware" > "$FWPATH"
 insmod "$DIR/gpu_unlock.ko" targets="$GPU"
 rc=$?
-printf '%s' "$old" > "$FWPATH"
+# echo, not printf: the kernel ignores an empty write, and the loader strips the newline.
+echo "$old" > "$FWPATH"
 
 log "insmod exit $rc; kernel log:"
-dmesg | grep gpu_unlock | tail -n 5 | while read -r line; do log "$line"; done
+dmesg | grep -e gpu_unlock -e "$GPU" | tail -n 5 | while read -r line; do log "$line"; done
 exit 0

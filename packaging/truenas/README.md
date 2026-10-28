@@ -10,8 +10,8 @@ NVIDIA 580.173.02) with an RTX 3060 12 GB LHR (`10de:2504`).
 
 | File | Runs on | Purpose |
 | --- | --- | --- |
-| `host-diagnostics.sh` | TrueNAS, as root | Read-only report plus a tarball of the kernel headers |
-| `build.sh` | Any Linux box with Docker | Firmware + module build in `debian:bookworm`, checks, bundle |
+| `host-diagnostics.sh` | TrueNAS, as root | Kernel headers tarball plus the checks below |
+| `build.sh` | Any Linux box with Docker | Firmware + module build in `debian:bookworm`, bundle |
 | `gpu-unlock-load.sh` | TrueNAS, from the bundle | Loads the module for one card; never fails the boot |
 
 ## Why it is done this way
@@ -42,30 +42,29 @@ NVIDIA 580.173.02) with an RTX 3060 12 GB LHR (`10de:2504`).
 
 ## Build
 
-1. On TrueNAS, collect the headers and a report (read-only apart from the
-   output directory):
+1. On TrueNAS, collect the headers and run the checks (read-only apart from
+   the output directory):
    ```sh
    sudo bash host-diagnostics.sh            # writes /tmp/gpu-unlock-diag
    ```
-   Check the report: `sig_enforce` must be `N`, `docker nvidia: True`, and
-   your card's `lspci -vvv` must show `FLReset+`.
+   It prints `sig_enforce`, which must be `N`, `docker nvidia`, which must be
+   `True`, and `FLReset+`, which must be `yes` for your card.
 2. Copy `/tmp/gpu-unlock-diag` to a Linux machine with Docker and Python 3,
    and from the repository root run:
    ```sh
    packaging/truenas/build.sh <copied gpu-unlock-diag dir>
    ```
-   It downloads the pinned NVIDIA inputs once, generates the firmware,
-   checks that the container's GCC and pahole match the kernel's, builds with
-   `-Werror`, checks vermagic and every imported symbol's CRC against
-   `Module.symvers`, and writes
+   It downloads the pinned NVIDIA inputs once per NVIDIA version, generates
+   the firmware, checks that the container's GCC matches the kernel's, builds
+   against the kernel's `Module.symvers`, and writes
    `packaging/truenas/out/gpu-unlock-<KVER>.tar.gz`.
    The firmware is NVIDIA's; the bundle is for your own machine only.
 
 ## Install
 
 Below, `<KVER>` is the kernel version (`uname -r`) and `<GPU>` the card's
-address as `lspci -D` prints it, e.g. `0000:2b:00.0`. Nothing takes effect
-until the next full power-off.
+address as `lspci -D` prints it, e.g. `0000:2b:00.0`. The loader unlocks
+exactly one card. Nothing takes effect until the next full power-off.
 
 1. Copy the bundle to `/tmp` on TrueNAS, then:
    ```sh
@@ -79,8 +78,8 @@ until the next full power-off.
 2. Add the drop-in:
    ```sh
    sudo mkdir -p /etc/systemd/system/middlewared.service.d
-   printf '[Service]\nEnvironment=GPU=%s\nExecStartPre=-%s\n' \
-     '<GPU>' /root/gpu-unlock/gpu-unlock-<KVER>/gpu-unlock-load.sh |
+   printf '[Service]\nExecStartPre=-%s %s\n' \
+     /root/gpu-unlock/gpu-unlock-<KVER>/gpu-unlock-load.sh '<GPU>' |
      sudo tee /etc/systemd/system/middlewared.service.d/gpu-unlock.conf
    sudo systemctl daemon-reload
    ```
@@ -99,7 +98,7 @@ until the next full power-off.
 
 The loader adds about a second to boot. It does nothing, and middlewared
 starts as usual, when `gpu_unlock.disable` is on the kernel command line,
-`GPU` is unset, the running kernel is not the one the module was built for,
+no card address is given, the running kernel is not the one the module was built for,
 the card is missing or already bound, or the bundle checksum fails.
 If an unlock fails part-way, the card can stay unusable until a full
 power-off; pools, network and middleware are unaffected.
