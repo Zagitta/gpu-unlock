@@ -1676,7 +1676,7 @@ int gpu_unlock_610_unlock(const struct gu_device *device, const struct gpu_unloc
 		 * reference and this module until the next power off. */
 		dev_err(&pdev->dev, "firmware did not stop; keeping its DMA buffers until power off\n");
 		__module_get(THIS_MODULE);
-		return ret;
+		return -EHWPOISON;
 	}
 	pci_dev_put(work->pdev);
 	kfree(work);

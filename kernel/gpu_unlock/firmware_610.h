@@ -67,9 +67,9 @@ gpu_unlock_610_booter_find(const struct gpu_unlock_610_shared *shared,
 	return NULL;
 }
 
-/* Serial preparation only; no workers may run until all calls have returned.
- * Cache failures for this round without invalidating another family's assets.
- * A fresh round starts after release_shared(), including on resume. */
+/* The caller serialises preparation against running unlocks (main.c holds
+ * shared_sem for write here and for read around each unlock). Failures are
+ * cached per family without invalidating another family's assets. */
 int gpu_unlock_610_load_shared(const struct gu_device *device, struct gpu_unlock_610_shared *shared);
 void gpu_unlock_610_release_shared(struct gpu_unlock_610_shared *shared);
 
