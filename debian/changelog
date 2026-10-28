@@ -1,3 +1,9 @@
+gpu-unlock (2.0.0) UNRELEASED; urgency=medium
+
+  * Add Turing and Ada Lovelace support.
+
+ -- Zagitta <zetlon+github@gmail.com>  Tue, 27 Oct 2026 00:00:00 +0000
+
 gpu-unlock (1.1.0) UNRELEASED; urgency=medium
 
   * Initial release.

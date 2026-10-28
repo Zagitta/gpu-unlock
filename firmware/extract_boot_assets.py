@@ -17,9 +17,11 @@ SOURCES = (
     'g_bindata_kgspGetBinArchiveBooterLoadUcode_AD102.c',
     'g_bindata_kgspGetBinArchiveBooterLoadUcode_GA100.c',
     'g_bindata_kgspGetBinArchiveBooterLoadUcode_GA102.c',
+    'g_bindata_kgspGetBinArchiveBooterLoadUcode_TU102.c',
     'g_bindata_kgspGetBinArchiveGspRmBoot_AD102.c',
     'g_bindata_kgspGetBinArchiveGspRmBoot_GA100.c',
     'g_bindata_kgspGetBinArchiveGspRmBoot_GA102.c',
+    'g_bindata_kgspGetBinArchiveGspRmBoot_TU102.c',
     'g_bindata_ksec2GetBinArchiveBlUcode_TU102.c',
 )
 
@@ -65,7 +67,7 @@ def _array_bytes(text: str, label: str) -> tuple[bytes, bool, int]:
     return data, compressed, expected
 
 
-def build_bundle(source_text: str) -> bytes:
+def build_bundle(source_text: str, signature_size: int = 384) -> bytes:
     image, _, _ = _array_bytes(source_text, "IMAGE_PROD")
     header, _, _ = _array_bytes(source_text, "HEADER_PROD")
     signatures, _, _ = _array_bytes(source_text, "SIG_PROD")
@@ -78,9 +80,9 @@ def build_bundle(source_text: str) -> bytes:
     loc = struct.unpack("<I", patch_loc)[0]
     _fuse, engine, ucode = struct.unpack("<3I", patch_meta)
     count = struct.unpack("<I", num_sigs)[0]
-    if not count or len(signatures) != count * 384 or fields[4] != 1 or not ucode:
+    if not count or len(signatures) != count * signature_size or fields[4] != 1 or not ucode:
         raise ValueError('unsupported production Booter signature/application table')
-    if loc < fields[2] or loc + 384 > fields[2] + fields[3] or fields[2] + fields[3] > len(image):
+    if loc < fields[2] or loc + signature_size > fields[2] + fields[3] or fields[2] + fields[3] > len(image):
         raise ValueError('signature patch is outside DMEM image')
     for offset, size in ((fields[0],fields[1]), (fields[2],fields[3]), (fields[5],fields[6])):
         if offset + size > len(image) or offset % 256 or size % 256:
@@ -125,6 +127,21 @@ def extract_assets(source_root: Path, output: Path) -> None:
     blobs['booter_load_ad102.bin'] = build_bundle(inputs['g_bindata_kgspGetBinArchiveBooterLoadUcode_AD102.c'])
     blobs['gsp_boot_ad102.bin'] = _array_bytes(ad102_boot, 'UCODE_IMAGE_PROD')[0]
     blobs['gsp_boot_desc_ad102.bin'] = _array_bytes(ad102_boot, 'UCODE_DESC_PROD')[0]
+    tu102_boot = inputs['g_bindata_kgspGetBinArchiveGspRmBoot_TU102.c']
+    tu102_image = _array_bytes(tu102_boot, 'UCODE_IMAGE')[0]
+    tu102_desc = _array_bytes(tu102_boot, 'UCODE_DESC')[0]
+    if len(tu102_desc) != 76 or struct.unpack('<I', tu102_desc[:4])[0] != 4 or \
+            len(tu102_image) != 4096:
+        raise ValueError('unsupported TU102 bootloader descriptor')
+    tu102_bl = _array_bytes(
+        inputs['g_bindata_ksec2GetBinArchiveBlUcode_TU102.c'], 'UCODE_IMAGE')[0]
+    if len(tu102_bl) != 768:
+        raise ValueError('unexpected TU102 SEC2 loader size')
+    blobs['booter_load_tu102.bin'] = build_bundle(
+        inputs['g_bindata_kgspGetBinArchiveBooterLoadUcode_TU102.c'], 16)
+    blobs['gsp_boot_tu102.bin'] = tu102_image
+    blobs['gsp_boot_desc_tu102.bin'] = tu102_desc
+    blobs['sec2_bl_tu102.bin'] = tu102_bl
     output.mkdir(parents=True, exist_ok=True)
     for name, data in blobs.items():
         (output/name).write_bytes(data)

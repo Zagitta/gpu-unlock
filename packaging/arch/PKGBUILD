@@ -7,7 +7,7 @@
 # For a published release, point the first source at the tagged tarball.
 pkgbase=gpu-unlock
 pkgname=(gpu-unlock-dkms gpu-unlock-firmware)
-pkgver=1.1.0
+pkgver=2.0.0
 pkgrel=1
 _nv=610.43.03
 _installer=NVIDIA-Linux-x86_64-$_nv-no-compat32.run

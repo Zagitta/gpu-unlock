@@ -23,10 +23,15 @@ int gu_payload_check(const struct gu_payload *payload)
 	size_t i;
 
 	if (!payload || !payload->name || !payload->size || (payload->size & 3) ||
-	    payload->value_off > payload->size - 4 ||
-	    payload->address_off > payload->size - 4 ||
-	    (payload->word_count && !payload->words))
+	    !payload->writes || payload->writes > GU_PAYLOAD_MAX_WRITES ||
+	    !payload->slots || (payload->word_count && !payload->words))
 		return GU_DIAG(-EINVAL);
+	for (i = 0; i < payload->writes; i++)
+		if ((payload->slots[i].value_off &&
+		     payload->slots[i].value_off > payload->size - 4) ||
+		    (payload->slots[i].address_off &&
+		     payload->slots[i].address_off > payload->size - 4))
+			return GU_DIAG(-EINVAL);
 	for (i = 0; i < payload->word_count; i++)
 		if (payload->words[i].offset > payload->size - 4)
 			return GU_DIAG(-EINVAL);
@@ -34,7 +39,7 @@ int gu_payload_check(const struct gu_payload *payload)
 }
 
 int gu_payload_build(const struct gu_payload *payload, u8 *image,
-		     u32 address, u32 value)
+		     const struct gu_reg_write *writes, size_t count)
 {
 	u32 offset;
 	size_t i;
@@ -45,11 +50,17 @@ int gu_payload_build(const struct gu_payload *payload, u8 *image,
 	ret = gu_payload_check(payload);
 	if (ret)
 		return ret;
+	if (count > payload->writes || (count && !writes))
+		return GU_DIAG(-EINVAL);
 	for (offset = 0; offset < payload->size; offset += 4)
 		put_word(image, offset, payload->fill);
 	for (i = 0; i < payload->word_count; i++)
 		put_word(image, payload->words[i].offset, payload->words[i].value);
-	put_word(image, payload->value_off, value);
-	put_word(image, payload->address_off, address);
+	for (i = 0; i < count; i++) {
+		if (payload->slots[i].value_off)
+			put_word(image, payload->slots[i].value_off, writes[i].value);
+		if (payload->slots[i].address_off)
+			put_word(image, payload->slots[i].address_off, writes[i].addr);
+	}
 	return 0;
 }

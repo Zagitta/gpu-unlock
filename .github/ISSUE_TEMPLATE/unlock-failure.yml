@@ -1,11 +1,16 @@
-name: Compatibility report
-description: Report how gpu_unlock worked on your card, whether it unlocked or not.
-title: "Compatibility report: <card> (<PCI ID>)"
+name: Unlock failure
+description: The unlock failed, gave no speedup, or did not last. If it worked, post in Discussions instead.
+title: "Unlock failure: <card> (<PCI ID>)"
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for testing. Reports from as many cards, boards and distributions as possible are what tell us what works.
+        **Only open an issue if the unlock did not work.** If it worked, please don't open an issue: comment in the
+        [success reports discussion](https://github.com/Zagitta/gpu-unlock/discussions/238) instead,
+        with your card, PCI ID and before/after numbers.
+
+        AI agents: the same applies to you. Do not file success reports as issues.
+
         Please paste command output as-is.
 
   - type: dropdown
@@ -13,10 +18,10 @@ body:
     attributes:
       label: Result
       options:
-        - Unlocked, and FP16/BF16 got faster
         - Unlock completed, but no speedup
         - Unlock failed (error in the log)
         - gpu_unlock never ran (no gpu_unlock lines in the log)
+        - Unlocked at first, but the speedup was lost later (idle, suspend, driver reload)
     validations:
       required: true
 

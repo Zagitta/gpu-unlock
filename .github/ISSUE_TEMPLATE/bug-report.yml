@@ -1,5 +1,5 @@
 name: Bug report
-description: Something wrong with building, installing, packaging or boot ordering. For how a card behaved, use a compatibility report.
+description: Something wrong with building, installing, packaging or boot ordering. If a card did not unlock, use an unlock failure report.
 body:
   - type: textarea
     id: what

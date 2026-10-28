@@ -213,4 +213,4 @@ module_init(gpu_unlock_init);
 module_exit(gpu_unlock_exit);
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("Ampere pre-driver hardware unlock");
-MODULE_VERSION("1.1.0");
+MODULE_VERSION("2.0.0");

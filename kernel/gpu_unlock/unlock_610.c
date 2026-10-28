@@ -255,12 +255,14 @@ static void gu_snapshot(struct unlock_transaction_work *work, const char *functi
 	if (work->payload)
 		payload = work->payload->name;
 	gu_read_boot_state(work, &b);
-	read_bar(work, GU_FEAT_PLM_OFFSET, &feat);
+	if (work->card && work->card->family) {
+		read_bar(work, work->card->family->feat_plm, &feat);
+		read_bar(work, work->card->family->feat_ss0, &ss0);
+		read_bar(work, work->card->family->feat_ss1, &ss1);
+	}
 	read_bar(work, GU_WPR_CFG_PLM_OFFSET, &wpr_cfg);
 	read_bar(work, GU_WPR_PLM_OFFSET, &wpr);
 	read_bar(work, GU_MMU_LOCK_CFG_PLM_OFFSET, &lock);
-	read_bar(work, GU_FEAT_SS0_OFFSET, &ss0);
-	read_bar(work, GU_FEAT_SS1_OFFSET, &ss1);
 	diag_pci_word(work, false, PCI_COMMAND, &command);
 	diag_pci_word(work, true, PCI_EXP_DEVSTA, &devsta);
 	if (work->streaming_ptr)
@@ -437,56 +439,103 @@ static int unlock_transaction_layout(struct unlock_transaction_work *work)
 	u32 mb, vga, lo, hi, plm;
 	int ret;
 
-	if (read_bar(work, GU_GFW_FB_SIZE_OFFSET, &mb) || !mb || mb == ~0u ||
-	    read_bar(work, GU_VGA_WORKSPACE_BASE_OFFSET, &vga) || vga == ~0u ||
-	    read_bar(work, GU_MMU_LOCK_CFG_PLM_OFFSET, &plm) || plm == ~0u || !(plm & 1) ||
-	    read_bar(work, GU_MMU_LOCK_ADDR_LO_OFFSET, &lo) || lo == ~0u ||
-	    read_bar(work, GU_MMU_LOCK_ADDR_HI_OFFSET, &hi) || hi == ~0u)
-		return GU_RESULT(-ENODEV);
-	/* Keep the cold board inputs in the USB kernel log even on layout failure.
-	 * Register values after NVIDIA binds cannot reconstruct this state. */
-	dev_dbg(&work->pdev->dev,
-		 "layout inputs: fb_mb=%#x vga=%#x mmu_plm=%#x mmu_lo=%#x mmu_hi=%#x image=%llu boot=%u\n",
-		 mb, vga, plm, lo, hi, (unsigned long long)work->bundle->image_span.size,
-		 work->bundle->boot_desc.image_size);
-	in->usable_fb = (u64)mb << 20;
-	if (in->usable_fb < 256ull << 20) {
-		dev_err(&work->pdev->dev, "layout rejected: usable FB below 256 MiB\n");
-		return GU_RESULT(-ERANGE);
-	}
-	/* kgspPopulateWprMeta_TU102: PRAMIN is the top 1 MiB fallback. */
-	in->vga_base = in->usable_fb - (1ull << 20);
-	if (vga & (1u << 3)) {
-		in->vga_base = (u64)(vga >> 8) << 16;
-		if (in->vga_base < in->usable_fb - (1ull << 20))
-			in->vga_base = in->usable_fb - 0x20000;
-	}
-	if (in->vga_base >= in->usable_fb) {
-		dev_err(&work->pdev->dev, "layout rejected: VGA base at or above usable FB\n");
-		return GU_RESULT(-ERANGE);
-	}
-	in->mmu_lock_low = (u64)(lo >> 4) << 12;
-	{
-		/* VAL is bits 31:4; the address is that field shifted by 12.
-		 * memmgrBlockMemLockedMemory_GA100 only treats the lock as the
-		 * VBIOS end-of-FB reservation when its exclusive high address is
-		 * the FB top. A lock elsewhere is not that reservation. GA102
-		 * has no scrubber, so WPR must stay in the pre-scrubbed top. */
-		u64 mmu_hi = (u64)(hi >> 4) << 12;
-		u64 mmu_top = mmu_hi > ~0ull - 0xffffull ? ~0ull :
-			(mmu_hi + 0xffffull) & ~0xffffull;
-		bool top_lock;
+	if (work->card->family->turing_layout) {
+		ktime_t deadline = ktime_add_us(ktime_get(), 3000000);
+		u32 range = 0, vga_reg = 0, mag, scale;
+		u64 fb_bytes;
 
-		in->mmu_lock_valid = mmu_hi >= in->mmu_lock_low;
-		top_lock = in->mmu_lock_valid && (mmu_top >> 20) == (in->usable_fb >> 20);
+		for (;;) {
+			if (read_bar(work, GU_TU102_FB_RANGE_OFFSET, &range) ||
+			    read_bar(work, GU_VGA_WORKSPACE_BASE_OFFSET, &vga_reg))
+				return GU_RESULT(-ENODEV);
+			if (range != ~0u && (range & 0xffff0000u) != 0xbadf0000u &&
+			    ((range >> 4) & 0x3fu))
+				break;
+			if (ktime_compare(ktime_get(), deadline) >= 0) {
+				dev_err(&work->pdev->dev,
+					"layout rejected: Turing FB range not ready (%#x)\n", range);
+				return GU_RESULT(-ETIMEDOUT);
+			}
+			usleep_range(20000, 21000);
+		}
 		dev_dbg(&work->pdev->dev,
-			 "layout mmu: lo=%#llx hi=%#llx hi_exclusive=%#llx constrain=%u\n",
-			 (unsigned long long)in->mmu_lock_low, (unsigned long long)mmu_hi,
-			 (unsigned long long)mmu_top, top_lock);
-		if (!top_lock) {
+			 "layout inputs: tu102 range=%#x vga=%#x image=%llu boot=%u\n",
+			 range, vga_reg,
+			 (unsigned long long)work->bundle->image_span.size,
+			 work->bundle->boot_desc.image_size);
+		mag = (range >> 4) & 0x3fu;
+		scale = range & 0xfu;
+		fb_bytes = (u64)mag << (scale + 20);
+		if (range & (1u << 30))
+			fb_bytes = fb_bytes / 16 * 15;
+		in->usable_fb = fb_bytes;
+		if (in->usable_fb < 256ull << 20) {
+			dev_err(&work->pdev->dev, "layout rejected: usable FB below 256 MiB\n");
+			return GU_RESULT(-ERANGE);
+		}
+		in->vga_base = in->usable_fb - (1ull << 20);
+		if (vga_reg & (1u << 3)) {
+			in->vga_base = (u64)(vga_reg >> 8) << 16;
+			if (in->vga_base < in->usable_fb - (1ull << 20))
+				in->vga_base = in->usable_fb - 0x20000;
+		}
+		if (in->vga_base >= in->usable_fb) {
+			dev_err(&work->pdev->dev, "layout rejected: VGA base at or above usable FB\n");
+			return GU_RESULT(-ERANGE);
+		}
+		in->mmu_lock_valid = false;
+	} else {
+		if (read_bar(work, GU_GFW_FB_SIZE_OFFSET, &mb) || !mb || mb == ~0u ||
+		    read_bar(work, GU_VGA_WORKSPACE_BASE_OFFSET, &vga) || vga == ~0u ||
+		    read_bar(work, GU_MMU_LOCK_CFG_PLM_OFFSET, &plm) || plm == ~0u || !(plm & 1) ||
+		    read_bar(work, GU_MMU_LOCK_ADDR_LO_OFFSET, &lo) || lo == ~0u ||
+		    read_bar(work, GU_MMU_LOCK_ADDR_HI_OFFSET, &hi) || hi == ~0u)
+			return GU_RESULT(-ENODEV);
+		/* Keep the cold board inputs in the USB kernel log even on layout failure.
+		 * Register values after NVIDIA binds cannot reconstruct this state. */
+		dev_dbg(&work->pdev->dev,
+			 "layout inputs: fb_mb=%#x vga=%#x mmu_plm=%#x mmu_lo=%#x mmu_hi=%#x image=%llu boot=%u\n",
+			 mb, vga, plm, lo, hi, (unsigned long long)work->bundle->image_span.size,
+			 work->bundle->boot_desc.image_size);
+		in->usable_fb = (u64)mb << 20;
+		if (in->usable_fb < 256ull << 20) {
+			dev_err(&work->pdev->dev, "layout rejected: usable FB below 256 MiB\n");
+			return GU_RESULT(-ERANGE);
+		}
+		/* kgspPopulateWprMeta_TU102: PRAMIN is the top 1 MiB fallback. */
+		in->vga_base = in->usable_fb - (1ull << 20);
+		if (vga & (1u << 3)) {
+			in->vga_base = (u64)(vga >> 8) << 16;
+			if (in->vga_base < in->usable_fb - (1ull << 20))
+				in->vga_base = in->usable_fb - 0x20000;
+		}
+		if (in->vga_base >= in->usable_fb) {
+			dev_err(&work->pdev->dev, "layout rejected: VGA base at or above usable FB\n");
+			return GU_RESULT(-ERANGE);
+		}
+		in->mmu_lock_low = (u64)(lo >> 4) << 12;
+		{
+			/* VAL is bits 31:4; the address is that field shifted by 12.
+			 * memmgrBlockMemLockedMemory_GA100 only treats the lock as the
+			 * VBIOS end-of-FB reservation when its exclusive high address is
+			 * the FB top. A lock elsewhere is not that reservation. GA102
+			 * has no scrubber, so WPR must stay in the pre-scrubbed top. */
+			u64 mmu_hi = (u64)(hi >> 4) << 12;
+			u64 mmu_top = mmu_hi > ~0ull - 0xffffull ? ~0ull :
+				(mmu_hi + 0xffffull) & ~0xffffull;
+			bool top_lock;
+
+			in->mmu_lock_valid = mmu_hi >= in->mmu_lock_low;
+			top_lock = in->mmu_lock_valid && (mmu_top >> 20) == (in->usable_fb >> 20);
 			dev_dbg(&work->pdev->dev,
-				 "mmu lock ignored: high address is not the FB top\n");
-			in->mmu_lock_valid = false;
+				 "layout mmu: lo=%#llx hi=%#llx hi_exclusive=%#llx constrain=%u\n",
+				 (unsigned long long)in->mmu_lock_low, (unsigned long long)mmu_hi,
+				 (unsigned long long)mmu_top, top_lock);
+			if (!top_lock) {
+				dev_dbg(&work->pdev->dev,
+					 "mmu lock ignored: high address is not the FB top\n");
+				in->mmu_lock_valid = false;
+			}
 		}
 	}
 	in->frts_size = 1ull << 20;
@@ -515,8 +564,10 @@ static int unlock_transaction_layout(struct unlock_transaction_work *work)
 		 (unsigned long long)work->layout.frts_offset,
 		 (unsigned long long)work->layout.wpr_end,
 		 (unsigned long long)(in->usable_fb - (256ull << 20)));
-	/* GA102 has no scrubber: all reservations must fit the pre-scrubbed top. */
-	if (work->layout.nonwpr_start < in->usable_fb - (256ull << 20)) {
+	/* GA102 has no scrubber: all reservations must fit the pre-scrubbed top.
+	 * Turing uses the VBIOS FB range without that scrubber constraint. */
+	if (!work->card->family->turing_layout &&
+	    work->layout.nonwpr_start < in->usable_fb - (256ull << 20)) {
 		dev_err(&work->pdev->dev, "layout rejected: reservations below pre-scrubbed top 256 MiB\n");
 		return GU_RESULT(-ERANGE);
 	}
@@ -694,7 +745,7 @@ static int unlock_transaction_dma(struct unlock_transaction_work *work)
 	/* No launch precedes the first table entry, so the slots stay unused
 	 * until run_privileged_writes() builds the image for its write. */
 	{
-		int ret = gu_payload_build(work->payload, work->buffer.cpu, 0, 0);
+		int ret = gu_payload_build(work->payload, work->buffer.cpu, NULL, 0);
 
 		if (ret)
 			return GU_RESULT(ret);
@@ -736,7 +787,7 @@ static int unlock_transaction_fwsec(struct unlock_transaction_work *work)
 	u64 frts = work->layout.frts_offset;
 	int ret;
 
-	/* kgspExtractVbiosFromRom_TU102 reads NV_PROM_DATA, up to 1 MiB.
+	/* kgspExtractVbiosFromRom_TU102 reads up to 1 MiB.
 	 * pci_map_rom stops at the PCI last-image flag and hides the VN extension. */
 	dev_dbg(&work->pdev->dev, "FWSEC: reading PROM at %#x\n", GU_PROM_DATA_OFFSET);
 	if (work->bar_len < GU_PROM_DATA_OFFSET + 0x1a)
@@ -894,9 +945,9 @@ static int unlock_transaction_gfw(struct unlock_transaction_work *work)
 		if (!assessed) {
 			u32 ss0, ss1, wpr_hi, plm;
 
-			if (read_bar(work, GU_FEAT_PLM_OFFSET, &plm) ||
-			    read_bar(work, GU_FEAT_SS0_OFFSET, &ss0) || ss0 == ~0u ||
-			    read_bar(work, GU_FEAT_SS1_OFFSET, &ss1) || ss1 == ~0u ||
+			if (read_bar(work, work->card->family->feat_plm, &plm) ||
+			    read_bar(work, work->card->family->feat_ss0, &ss0) || ss0 == ~0u ||
+			    read_bar(work, work->card->family->feat_ss1, &ss1) || ss1 == ~0u ||
 			    read_bar(work, GU_WPR2_ADDR_HI_OFFSET, &wpr_hi) || inaccessible(wpr_hi))
 				return GU_RESULT(-ENODEV);
 			dev_dbg(&work->pdev->dev, "entry: plm=%#x ss0=%#x ss1=%#x wpr2_hi=%#x\n",
@@ -946,8 +997,8 @@ static int unlock_transaction_suspended(struct unlock_transaction_work *work)
 		return GU_RESULT(-ENOMEM);
 	/* Read before GFW completes, so an unreadable value proves nothing yet. */
 	if (read_bar(work, GU_WPR2_ADDR_HI_OFFSET, &wpr_hi) ||
-	    read_bar(work, GU_FEAT_SS0_OFFSET, &ss0) ||
-	    read_bar(work, GU_FEAT_SS1_OFFSET, &ss1))
+	    read_bar(work, work->card->family->feat_ss0, &ss0) ||
+	    read_bar(work, work->card->family->feat_ss1, &ss1))
 		return GU_RESULT(-EIO);
 	dev_dbg(&work->pdev->dev, "resume entry: wpr2_hi=%#x ss0=%#x ss1=%#x\n",
 		 wpr_hi, ss0, ss1);
@@ -1019,7 +1070,7 @@ static int unlock_transaction_boot(struct unlock_transaction_work *work)
 		return GU_RESULT(-ENODEV);
 	read_bar(work, GU_WPR2_ADDR_LO_OFFSET, &wpr_lo);
 	read_bar(work, GU_WPR2_ADDR_HI_OFFSET, &wpr_hi);
-	read_bar(work, GU_FEAT_PLM_OFFSET, &feat);
+	read_bar(work, work->card->family->feat_plm, &feat);
 	read_bar(work, GU_WPR_CFG_PLM_OFFSET, &wpr_cfg);
 	read_bar(work, GU_SEC2_BASE + GU_SEC2_CSBERRSTAT_OFFSET, &csberr);
 	read_bar(work, GU_SEC2_BASE + GU_FALCON_FHSTATE_OFFSET, &fhstate);
@@ -1039,6 +1090,12 @@ static int unlock_transaction_boot(struct unlock_transaction_work *work)
 	    work->payload->completion == GU_PAYLOAD_HALT_RESET_PLM_ECHO)
 		cleanup_complete = mailbox0 == lower_32_bits(work->meta.dma) &&
 			mailbox1 == upper_32_bits(work->meta.dma);
+	if (cleanup_complete &&
+	    work->payload->completion == GU_PAYLOAD_HALT_RESET_PLM_MARKER)
+		cleanup_complete = mailbox0 == work->payload->marker;
+	if (cleanup_complete &&
+	    work->payload->completion == GU_PAYLOAD_HALT_RESET_PLM_ZERO)
+		cleanup_complete = mailbox0 == 0;
 	dev_dbg(&work->pdev->dev,
 		 "invocation: index=%zu attempt=%u reset=%u/%u reload=%u start=%u cpuctl=%#x engine=%#x reset_plm@%#x=%#x mailbox=%#x:%#x acr=%#x csberr=%#x fhstate=%#x wpr2=%#x:%#x plm_feat=%#x plm_wpr_cfg=%#x fresh=%u cleanup_observed=%u result=%d\n",
 		 work->write_index, work->attempt, launch.reset_asserted,
@@ -1130,7 +1187,7 @@ static int restore_frts(struct unlock_transaction_work *work)
 	{
 		u32 feat = 0, wpr_cfg = 0, wpr = 0, lock = 0;
 
-		read_bar(work, GU_FEAT_PLM_OFFSET, &feat);
+		read_bar(work, work->card->family->feat_plm, &feat);
 		read_bar(work, GU_WPR_CFG_PLM_OFFSET, &wpr_cfg);
 		read_bar(work, GU_WPR_PLM_OFFSET, &wpr);
 		read_bar(work, GU_MMU_LOCK_CFG_PLM_OFFSET, &lock);
@@ -1152,18 +1209,36 @@ static int table_failure(struct unlock_transaction_work *work, const char *phase
 static int run_privileged_writes(struct unlock_transaction_work *work,
 				 const struct gu_write_table *table)
 {
-	size_t i;
+	const size_t per_launch = work->payload->writes;
+	struct gu_reg_write batch[GU_PAYLOAD_MAX_WRITES];
+	size_t i, j, count;
 	u32 after = 0;
+	bool matched;
 	int ret;
+
 	if (work->state != GU_PUBLISHED && work->state != GU_ACTIVE)
 		return GU_RESULT(-EPROTO);
+	if (!table->count)
+		return 0;
 	work->state = GU_ACTIVE;
-	for (i = 0; i < table->count; i++) {
-		const struct gu_reg_write *entry = &table->entries[i];
+	for (i = 0; i < table->count; i += per_launch) {
+		const struct gu_reg_write *entry;
+
+		count = table->count - i;
+		if (count > per_launch)
+			count = per_launch;
+		/* Repeat the last write of this launch to fill the payload's fixed
+		 * slot count. The recipe's final write must therefore be the value
+		 * the chain's unused slots already produce. */
+		for (j = 0; j < per_launch; j++)
+			batch[j] = table->entries[i + (j < count ? j : count - 1)];
+		entry = &batch[0];
+		matched = false;
 		work->write_index = i;
 		for (work->attempt = 1; work->attempt <= 2; work->attempt++) {
 			u32 before, lo = 0, hi = 0, ctl = 0, engine = 0;
 			struct gu_boot_state st;
+
 			work->error_reported = false;
 			work->target_addr = entry->addr;
 			work->target_value = entry->value;
@@ -1192,54 +1267,78 @@ static int run_privileged_writes(struct unlock_transaction_work *work,
 			read_bar(work, GU_WPR2_ADDR_HI_OFFSET, &hi);
 			gu_read_boot_state(work, &st);
 			dev_dbg(&work->pdev->dev,
-				 "prelaunch: index=%zu/%zu attempt=%u target=%#x value=%#x before=%#x cpuctl=%#x engine=%#x reset_plm=%#x wpr2=%#x:%#x fhstate=%#x\n",
-				 i, table->count, work->attempt, entry->addr, entry->value,
+				 "prelaunch: index=%zu/%zu count=%zu attempt=%u target=%#x value=%#x before=%#x cpuctl=%#x engine=%#x reset_plm=%#x wpr2=%#x:%#x fhstate=%#x\n",
+				 i, table->count, count, work->attempt, entry->addr, entry->value,
 				 before, ctl, engine, st.reset_plm, lo, hi, st.fhstate);
-			ret = gu_payload_build(work->payload, work->buffer.cpu,
-					       entry->addr, entry->value);
+			ret = gu_payload_build(work->payload, work->buffer.cpu, batch,
+					       per_launch);
 			if (ret)
 				return table_failure(work, "payload", entry, after, ret);
 			put_le64((u8 *)work->meta.cpu + 72, work->buffer.dma);
 			put_le64((u8 *)work->meta.cpu + 80, work->payload->size);
 			dma_wmb();
 			dev_dbg(&work->pdev->dev,
-				 "payload: name=%s size=%#x dma=%#llx index=%zu/%zu attempt=%u address=%#x value=%#x mode=%s\n",
+				 "payload: name=%s size=%#x dma=%#llx index=%zu/%zu writes=%zu attempt=%u first=%#x:%#x mode=%s\n",
 				 work->payload->name, work->payload->size,
 				 (unsigned long long)work->buffer.dma, i, table->count,
-				 work->attempt, entry->addr, entry->value,
+				 count, work->attempt, entry->addr, entry->value,
 				 work->attempt > 1 ? "retry" : "first");
 			ret = unlock_transaction_boot(work);
-			if (read_bar(work, entry->addr, &after) ||
-			    (after & 0xffff0000u) == 0xbadf0000u ||
-			    read_bar(work, GU_WPR2_ADDR_LO_OFFSET, &lo) || read_bar(work, GU_WPR2_ADDR_HI_OFFSET, &hi))
+			if (ret)
+				return table_failure(work, "completion", entry, after, ret);
+			if (read_bar(work, GU_WPR2_ADDR_LO_OFFSET, &lo) ||
+			    read_bar(work, GU_WPR2_ADDR_HI_OFFSET, &hi))
 				return table_failure(work, "result-inaccessible", entry, after, -ENODEV);
 			gu_read_boot_state(work, &st);
-			dev_dbg(&work->pdev->dev,
-				 "write result: index=%zu/%zu attempt=%u address=%#x expected=%#x observed=%#x wpr2=%#x:%#x write=%u reset_plm=%#x ctl=%#x engine=%#x fhstate=%#x mbox=%#x:%#x acr=%#x csberr=%#x\n",
-				 i, table->count, work->attempt, entry->addr, entry->value,
-				 after, lo, hi, after == entry->value, st.reset_plm,
-				 st.ctl, st.engine, st.fhstate, st.mailbox1, st.mailbox0,
-				 st.acr, st.csberr);
-			if (ret) {
-				dev_err(&work->pdev->dev, "failed invocation WPR2: actual=%#x:%#x saved_FRTS=%#x:%#x\n",
-					lo, hi, work->frts_lo, work->frts_hi);
-				return table_failure(work, "completion", entry, after, ret);
-			}
-			if (after == entry->value) {
+			matched = true;
+			for (j = 0; j < count; j++) {
+				const struct gu_reg_write *written = &table->entries[i + j];
+				u32 expected = written->expect ? written->expect : written->value;
+				u32 observed = 0;
+
+				if (read_bar(work, written->addr, &observed) ||
+				    (observed & 0xffff0000u) == 0xbadf0000u) {
+					work->target_addr = written->addr;
+					work->target_value = written->value;
+					return table_failure(work, "result-inaccessible",
+							     written, observed, -ENODEV);
+				}
+				if (observed != expected) {
+					if (written->optional) {
+						dev_info(&work->pdev->dev,
+							 "gpu_unlock: optional write %zu/%zu target=%#x wrote=%#x expected=%#x observed=%#x\n",
+							 i + j + 1, table->count, written->addr,
+							 written->value, expected, observed);
+						continue;
+					}
+					matched = false;
+					after = observed;
+					work->target_addr = written->addr;
+					work->target_value = written->value;
+					table_failure(work, "readback", written, observed, -EIO);
+					continue;
+				}
 				dev_info(&work->pdev->dev,
 					 "gpu_unlock: pass=%zu/%zu attempt=%u target=%#x value=%#x before=%#x after=%#x wpr2=%#x:%#x reset_plm=%#x mbox=%#x:%#x ret=0\n",
-					 i + 1, table->count, work->attempt, entry->addr,
-					 entry->value, before, after, lo, hi,
+					 i + j + 1, table->count, work->attempt, written->addr,
+					 written->value, before, observed, lo, hi,
 					 st.reset_plm, st.mailbox1, st.mailbox0);
-				break;
 			}
+			dev_dbg(&work->pdev->dev,
+				 "write result: index=%zu/%zu count=%zu attempt=%u first=%#x expected=%#x observed=%#x wpr2=%#x:%#x write=%u reset_plm=%#x ctl=%#x engine=%#x fhstate=%#x mbox=%#x:%#x acr=%#x csberr=%#x\n",
+				 i, table->count, count, work->attempt, entry->addr, entry->value,
+				 after, lo, hi, matched, st.reset_plm,
+				 st.ctl, st.engine, st.fhstate, st.mailbox1, st.mailbox0,
+				 st.acr, st.csberr);
+			if (matched)
+				break;
 			/* Only literal idempotent PLMs belong here. A mismatching
 			 * readback after proven halt/cleanup may be retried once.
 			 * Errors/timeouts never replay an uncertain side effect. */
-			table_failure(work, "readback", entry, after, -EIO);
 		}
-		if (after != entry->value)
-			return table_failure(work, "readback-exhausted", entry, after, -EIO);
+		if (!matched)
+			return table_failure(work, "readback-exhausted",
+					     &table->entries[i + count - 1], after, -EIO);
 	}
 	ret = restore_frts(work);
 	return ret && table->count ?
@@ -1281,9 +1380,9 @@ static int run_host_writes(struct unlock_transaction_work *work,
 	{
 		u32 ss0 = 0, ss1 = 0, feat = 0, wpr_cfg = 0;
 
-		read_bar(work, GU_FEAT_SS0_OFFSET, &ss0);
-		read_bar(work, GU_FEAT_SS1_OFFSET, &ss1);
-		read_bar(work, GU_FEAT_PLM_OFFSET, &feat);
+		read_bar(work, work->card->family->feat_ss0, &ss0);
+		read_bar(work, work->card->family->feat_ss1, &ss1);
+		read_bar(work, work->card->family->feat_plm, &feat);
 		read_bar(work, GU_WPR_CFG_PLM_OFFSET, &wpr_cfg);
 		dev_info(&work->pdev->dev,
 			 "gpu_unlock: stage=host ss0=%#x ss1=%#x plm_feat=%#x plm_wpr_cfg=%#x\n",
@@ -1370,8 +1469,8 @@ static int unlock_transaction_reset(struct unlock_transaction_work *work)
 
 	if (work->state != GU_STOCK)
 		return GU_RESULT(-EPROTO);
-	if (read_bar(work, GU_FEAT_SS0_OFFSET, &ss0) || ss0 == ~0u ||
-	    read_bar(work, GU_FEAT_SS1_OFFSET, &ss1) || ss1 == ~0u)
+	if (read_bar(work, work->card->family->feat_ss0, &ss0) || ss0 == ~0u ||
+	    read_bar(work, work->card->family->feat_ss1, &ss1) || ss1 == ~0u)
 		return GU_RESULT(-ENODEV);
 	dev_dbg(&work->pdev->dev, "pre-FLR selectors: ss0=%#x expected=%#x ss1=%#x expected=%#x\n",
 		ss0, GU_SS0_UNLOCK, ss1, GU_SS1_UNLOCK);
@@ -1447,9 +1546,9 @@ static int unlock_transaction_reset(struct unlock_transaction_work *work)
 	    !(cpuctl & GU_GFW_CPUCTL_HALTED) ||
 	    read_bar(work, GU_WPR2_ADDR_LO_OFFSET, &lo) || inaccessible(lo) ||
 	    read_bar(work, GU_WPR2_ADDR_HI_OFFSET, &hi) || inaccessible(hi) ||
-	    read_bar(work, GU_FEAT_SS0_OFFSET, &ss0) || inaccessible(ss0) ||
-	    read_bar(work, GU_FEAT_SS1_OFFSET, &ss1) || inaccessible(ss1) ||
-	    read_bar(work, GU_FEAT_PLM_OFFSET, &plm) ||
+	    read_bar(work, work->card->family->feat_ss0, &ss0) || inaccessible(ss0) ||
+	    read_bar(work, work->card->family->feat_ss1, &ss1) || inaccessible(ss1) ||
+	    read_bar(work, work->card->family->feat_plm, &plm) ||
 	    (plm & 0xffff0000u) == 0xbadf0000u)
 		return GU_RESULT(-ENODEV);
 	dev_dbg(&work->pdev->dev,
