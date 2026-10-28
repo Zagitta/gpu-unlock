@@ -17,6 +17,10 @@ fedora)
 	dnf builddep -qy packaging/rpm/gpu-unlock.spec
 	make rpm INPUTS="$INPUTS"
 	ls build/rpm/RPMS/noarch/*.rpm ;;
+opensuse*)
+	zypper -n install $(rpmspec -q --buildrequires packaging/rpm/gpu-unlock.spec)
+	make rpm INPUTS="$INPUTS"
+	ls build/rpm/RPMS/noarch/*.rpm ;;
 arch)
 	# makepkg refuses to run as root.
 	useradd -m builder

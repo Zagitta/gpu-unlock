@@ -30,7 +30,7 @@ DEBS    := $(foreach p,dkms firmware,$(DEBDIR)/gpu-unlock-$(p)_$(VERSION)_all.de
 
 .PHONY: all dist inputs firmware assets install-dkms install-firmware \
         install-mkinitcpio install-initramfs-tools install-dracut \
-        install-licenses arch deb rpm install install-arch install-deb install-rpm \
+        install-licenses arch deb rpm install install-arch install-deb install-rpm install-suse \
         test-module test-packages
 
 all:
@@ -103,13 +103,14 @@ install:
 			arch) target=arch ;; \
 			debian|ubuntu) target=deb ;; \
 			fedora|rhel|centos) target=rpm ;; \
+			opensuse*|suse) target=suse ;; \
 			*) continue ;; \
 		esac; \
 		echo "Detected $$distro family; running make install-$$target"; \
 		$(MAKE) install-$$target; \
 		exit $$?; \
 	done; \
-	echo "Unsupported distribution: $${ID:-unknown}. Use make install-arch, install-deb, or install-rpm explicitly (RPM requires DNF)." >&2; \
+	echo "Unsupported distribution: $${ID:-unknown}. Use make install-arch, install-deb, install-rpm (DNF) or install-suse (zypper) explicitly." >&2; \
 	exit 1
 
 arch:
@@ -142,6 +143,12 @@ install-rpm:
 	sudo dnf builddep -y packaging/rpm/gpu-unlock.spec
 	$(MAKE) rpm
 	sudo dnf install -y $(RPMDIR)/RPMS/noarch/gpu-unlock-*-$(VERSION)-*.noarch.rpm
+
+install-suse:
+	sudo zypper -n install rpm-build
+	sudo zypper -n install $$(rpmspec -q --buildrequires packaging/rpm/gpu-unlock.spec)
+	$(MAKE) rpm
+	sudo zypper -n install --allow-unsigned-rpm $(RPMDIR)/RPMS/noarch/gpu-unlock-*-$(VERSION)-*.noarch.rpm
 
 # Build the module, or build, install and remove the packages, in a
 # container of each distribution.
