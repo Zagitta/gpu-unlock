@@ -44,13 +44,28 @@ def _array_bytes(text: str, label: str) -> tuple[bytes, bool, int]:
     if not declaration:
         raise ValueError('malformed byte-array declaration')
     tokens = declaration[1].strip().rstrip(',').split(',')
-    if any(not re.fullmatch(r"\s*0x[0-9a-fA-F]{2}\s*", x) for x in tokens):
+    if all(re.fullmatch(r"\s*0x[0-9a-fA-F]{2}\s*", item) for item in tokens):
+        raw = bytes(int(item, 16) for item in tokens)
+    elif all(re.fullmatch(r"\s*0x[0-9a-fA-F]{1,16}ULL\s*", item) for item in tokens):
+        # Newer generated sources (615.71+) store the same stream as NvU64
+        # words instead of single bytes (issue #168); restore little-endian.
+        raw = b"".join(struct.pack("<Q", int(item.strip()[:-3], 16)) for item in tokens)
+    else:
         raise ValueError('non-byte token in generated array')
-    raw = bytes(int(item, 16) for item in tokens)
+    declared = expected
     if compressed:
         stored = re.findall(r"COMPRESSED SIZE \(bytes\): (\d+)", window)
-        if not stored or len(raw) != int(stored[-1]):
+        if not stored:
             raise ValueError('compressed storage size mismatch')
+        declared = int(stored[-1])
+    if len(raw) != declared:
+        # NvU64 expansion pads the array up to a multiple of 8 bytes while
+        # the declared size stays exact.  Accept only an all-zero tail.
+        if len(raw) < declared or any(raw[declared:]):
+            raise ValueError('compressed storage size mismatch' if compressed
+                             else f"{label}: array does not match the declared size")
+        raw = raw[:declared]
+    if compressed:
         inflater = zlib.decompressobj(-15)
         data = inflater.decompress(raw, expected + 1)
         # NVIDIA BINDATA stores raw DEFLATE followed by the gzip CRC32/ISIZE
