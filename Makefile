@@ -25,6 +25,7 @@ NV_INSTALLER   := NVIDIA-Linux-x86_64-$(NV)-no-compat32.run
 
 TARBALL := $(abspath $(DISTDIR))/gpu-unlock-$(VERSION).tar.xz
 DEBDIR  := $(abspath $(DISTDIR))/deb
+DEBBUILD ?= $(CACHE)/deb-build
 RPMDIR  := $(abspath $(DISTDIR))/rpm
 DEBS    := $(foreach p,dkms firmware,$(DEBDIR)/gpu-unlock-$(p)_$(VERSION)_all.deb)
 
@@ -118,12 +119,17 @@ arch:
 install-arch:
 	cd packaging/arch && makepkg -sif
 
+# Built under $(CACHE) rather than the checkout, which may be on a filesystem
+# without Unix modes (exFAT, NTFS): there every file is executable, and
+# debhelper runs executable files in debian/ as scripts.
 deb: dist inputs
-	rm -rf $(DEBDIR)
-	mkdir -p $(DEBDIR)
-	tar -xf $(TARBALL) -C $(DEBDIR)
-	cd $(DEBDIR)/gpu-unlock-$(VERSION) && \
+	rm -rf $(DEBDIR) $(DEBBUILD)
+	mkdir -p $(DEBDIR) $(DEBBUILD)
+	tar -xf $(TARBALL) -C $(DEBBUILD)
+	cd $(DEBBUILD)/gpu-unlock-$(VERSION) && \
 		GPU_UNLOCK_INPUTS=$(abspath $(INPUTS)) dpkg-buildpackage -us -uc
+	cp $(DEBBUILD)/gpu-unlock*_* $(DEBDIR)/
+	rm -rf $(DEBBUILD)
 
 install-deb:
 	sudo apt-get build-dep -y $(CURDIR)
