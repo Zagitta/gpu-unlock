@@ -719,6 +719,15 @@ static int unlock_transaction_claim(struct unlock_transaction_work *work)
 	return 0;
 }
 
+/* The falcon DMA base is 49 bits wide and every host address the GSP sees
+ * (radix-3 tables, WPR metadata, mailbox pairs) is carried as a u64, so the
+ * masks only need to be as wide as the driver's own: nvidia uses 47 bits.
+ * A 32-bit mask is not merely conservative, it fails outright on hosts whose
+ * PCIe inbound window maps system RAM above 4 GiB of bus address, e.g. the
+ * Raspberry Pi 5 (bus 0x1000000000 -> cpu 0x0), where no coherent buffer
+ * can then be allocated and the unlock stops at the first one with -ENOMEM. */
+#define GU_DMA_MASK DMA_BIT_MASK(47)
+
 static int unlock_transaction_dma(struct unlock_transaction_work *work)
 {
 	struct device *dev = &work->pdev->dev;
@@ -730,11 +739,11 @@ static int unlock_transaction_dma(struct unlock_transaction_work *work)
 	work->coherent_before = dev->coherent_dma_mask;
 	dev_dbg(dev, "DMA masks: streaming=%#llx coherent=%#llx requested=%#llx\n",
 		(unsigned long long)work->streaming_before, (unsigned long long)work->coherent_before,
-		(unsigned long long)DMA_BIT_MASK(32));
-	if (GU_DIAG(dma_set_mask(dev, DMA_BIT_MASK(32))))
+		(unsigned long long)GU_DMA_MASK);
+	if (GU_DIAG(dma_set_mask(dev, GU_DMA_MASK)))
 		return GU_RESULT(-EIO);
 	work->coherent_set = true;
-	if (GU_DIAG(dma_set_coherent_mask(dev, DMA_BIT_MASK(32))))
+	if (GU_DIAG(dma_set_coherent_mask(dev, GU_DMA_MASK)))
 		return GU_RESULT(-EIO);
 	if (alloc_dma(work, "booter", &work->booter_buf, booter_image_bytes(&work->booter->hdr)))
 		return GU_RESULT(-ENOMEM);
