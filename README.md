@@ -217,7 +217,7 @@ the cards off, which resets the speed selectors. The module keeps the card
 unlocked across all of these transitions:
 
 - **PCIe Runtime PM (`D3cold -> D0`):** When `nvidia` binds a target card, the
-  module wraps its `dev_pm_ops` (`runtime_resume`, `resume`, `restore`, `thaw`)
+  module wraps its `runtime_resume` callback in `dev_pm_ops`
   and unlocks the card right after the PCI core restores `PCI_D0` and BARs and
   before `nvidia` boots GSP-RM. Cards that remained in `D3hot` (retaining power)
   are detected in microseconds via `FEAT_SS0`/`FEAT_SS1` readback (`-EALREADY`).
