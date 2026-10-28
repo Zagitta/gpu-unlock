@@ -50,6 +50,7 @@ inputs:
 # Generate firmware from $(INPUTS) into $(ASSETS); debian/rules and the RPM
 # spec call this from their build step.
 firmware:
+	$(PYTHON) firmware/fetch_artifacts.py --offline $(INPUTS)
 	rm -rf $(ASSETS).src
 	mkdir -p $(ASSETS).src
 	tar -xf $(INPUTS)/$(NV_SOURCE).tar.xz -C $(ASSETS).src
