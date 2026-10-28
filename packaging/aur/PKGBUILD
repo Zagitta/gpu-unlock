@@ -1,0 +1,71 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Contributor: Matthias Schabhüttl
+# AUR maintenance is unassigned; add a Maintainer contact before publication.
+# Based on Zagitta/gpu-unlock's upstream Arch packaging.
+# Fixed 1.1.0 snapshot; upstream had no release tags when this was prepared.
+# Standalone build: cd packaging/aur && makepkg -si
+# After changes: makepkg --printsrcinfo > .SRCINFO
+pkgbase=gpu-unlock
+pkgname=(gpu-unlock-dkms gpu-unlock-firmware)
+pkgver=1.1.0
+pkgrel=1
+pkgdesc='Pre-driver NVIDIA GPU unlock for full FP16/BF16 tensor instruction rate'
+arch=('x86_64')
+url='https://github.com/Zagitta/gpu-unlock'
+license=('GPL-2.0-only')
+makedepends=('python' 'zstd')
+options=('!strip' '!debug')
+
+_commit=6081407b312aa3139a2bed62bdda354f4ffddc1d
+_nv=610.43.03
+_installer="NVIDIA-Linux-x86_64-${_nv}-no-compat32.run"
+_srcname="gpu-unlock-${_commit}"
+source=(
+  "${_srcname}.tar.gz::${url}/archive/${_commit}.tar.gz"
+  "https://download.nvidia.com/XFree86/NVIDIA-kernel-module-source/NVIDIA-kernel-module-source-${_nv}.tar.xz"
+  "https://download.nvidia.com/XFree86/Linux-x86_64/${_nv}/${_installer}"
+  'gpu-unlock.install'
+)
+noextract=("${_installer}")
+sha256sums=(
+  '498c9840e025e5b46d2cad5998dee25c014da226c5f14dec4ea2b73e5244fd2e'
+  '7e118923c7a23edc36114d63273a46e3e04e9af98695a42203e7ac2dfe9fc1dc'
+  'e084451db730a6df29d3d74f655749c4d236e3c945f7d94b5205e84318fe2f90'
+  'a2b008f9261d531e824e99f3252a87acf46e7b8cb96809a1d7c486b3ac00042f'
+)
+
+prepare() {
+  cd "${srcdir}/${_srcname}"
+  if [[ $(<VERSION) != "$pkgver" ]]; then
+    printf 'Upstream VERSION does not match pkgver=%s\n' "$pkgver" >&2
+    return 1
+  fi
+}
+
+build() {
+  cd "${srcdir}/${_srcname}"
+  # Extract firmware only; never execute the NVIDIA driver installer.
+  python firmware/extract_gsp.py "${srcdir}/${_installer}" "${srcdir}/assets"
+  python firmware/extract_boot_assets.py \
+    "${srcdir}/NVIDIA-kernel-module-source-${_nv}" "${srcdir}/assets"
+}
+
+package_gpu-unlock-dkms() {
+  pkgdesc='Pre-driver NVIDIA GPU tensor-rate unlock (DKMS sources)'
+  depends=('dkms' "gpu-unlock-firmware=${pkgver}-${pkgrel}")
+  backup=('etc/mkinitcpio.conf.d/zz-gpu-unlock.conf')
+  install=gpu-unlock.install
+
+  cd "${srcdir}/${_srcname}"
+  make DESTDIR="$pkgdir" install-dkms install-mkinitcpio install-dracut
+  make DESTDIR="$pkgdir" PKG="$pkgname" install-licenses
+}
+
+package_gpu-unlock-firmware() {
+  pkgdesc='NVIDIA firmware assets extracted locally for gpu-unlock'
+  license=('LicenseRef-NVIDIA' 'GPL-2.0-only')
+
+  cd "${srcdir}/${_srcname}"
+  make DESTDIR="$pkgdir" ASSETS="${srcdir}/assets" install-firmware
+  make DESTDIR="$pkgdir" PKG="$pkgname" install-licenses
+}

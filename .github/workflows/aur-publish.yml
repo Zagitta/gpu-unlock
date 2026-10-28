@@ -1,0 +1,69 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Optional setup in the repository of the accepting AUR maintainer:
+# - Set repository variable AUR_PUBLISH_ENABLED=true.
+# - Create environment aur, restricted to the default branch.
+# - Set its secret AUR_SSH_PRIVATE_KEY and variables AUR_GIT_NAME,
+#   AUR_GIT_EMAIL and AUR_KNOWN_HOSTS (verified aur.archlinux.org host keys).
+# - Add the accepting maintainer's name/contact to packaging/aur/PKGBUILD.
+# Review version, source commit, checksums and .SRCINFO before each dispatch.
+name: Publish AUR
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_aur_commit:
+        description: 'Reviewed AUR master commit SHA, or empty for first publication'
+        required: true
+        default: empty
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aur-publish
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    if: >-
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
+      vars.AUR_PUBLISH_ENABLED == 'true'
+    uses: ./.github/workflows/aur.yml
+
+  publish:
+    needs: validate
+    if: >-
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
+      vars.AUR_PUBLISH_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    environment: aur
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Publish reviewed packaging files
+        shell: bash
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          AUR_KNOWN_HOSTS: ${{ vars.AUR_KNOWN_HOSTS }}
+          AUR_GIT_NAME: ${{ vars.AUR_GIT_NAME }}
+          AUR_GIT_EMAIL: ${{ vars.AUR_GIT_EMAIL }}
+          EXPECTED_AUR_COMMIT: ${{ inputs.expected_aur_commit }}
+        run: |
+          set -euo pipefail
+          : "${AUR_SSH_PRIVATE_KEY:?Configure the aur environment's SSH key}"
+          : "${AUR_KNOWN_HOSTS:?Configure verified AUR host keys}"
+          umask 077
+          ssh_dir=$(mktemp -d "$RUNNER_TEMP/aur-ssh.XXXXXX")
+          trap 'rm -rf -- "$ssh_dir"' EXIT
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > "$ssh_dir/key"
+          printf '%s\n' "$AUR_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+          unset AUR_SSH_PRIVATE_KEY AUR_KNOWN_HOSTS
+          printf -v GIT_SSH_COMMAND \
+            'ssh -i %q -o UserKnownHostsFile=%q -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes -o BatchMode=yes' \
+            "$ssh_dir/key" "$ssh_dir/known_hosts"
+          export GIT_SSH_COMMAND
+          bash .github/ci/aur-publish.sh packaging/aur

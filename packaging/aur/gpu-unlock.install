@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: GPL-2.0-only
+post_install() {
+  cat <<'EOF'
+==> Install the headers matching every kernel you want to use with DKMS.
+==> gpu_unlock only unlocks GPUs when you opt in on the kernel command line:
+==>   gpu_unlock.targets=all           all supported, unbound GPUs
+==>   gpu_unlock.targets=0000:21:00.0  a specific PCI address from lspci -D
+==> Keep existing kernel options and regenerate your bootloader config or UKI.
+==> mkinitcpio's pacman hooks rebuild images after DKMS has finished.
+==> With custom mkinitcpio configs (-c or preset _config), add gpu_unlock
+==> immediately before nvidia in MODULES yourself; drop-ins are ignored.
+==> With dracut, rebuild your configured initramfs/UKI after the transaction.
+==> Reboot, then inspect: journalctl -k -b -g gpu_unlock
+==> See /usr/share/doc/gpu-unlock/README.md.
+EOF
+}
+
+post_upgrade() {
+  post_install
+}
+
+post_remove() {
+  cat <<'EOF'
+==> Remove gpu_unlock.targets= from your kernel command line.
+==> Remove any gpu_unlock entries you added to custom initramfs configs.
+==> With dracut, rebuild your configured initramfs/UKI before rebooting.
+EOF
+}
