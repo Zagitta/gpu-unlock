@@ -34,8 +34,8 @@ modules = [
 Keep your existing NVIDIA configuration. The module builds against
 `boot.kernelPackages` and loads before NVIDIA in either a systemd or scripted
 initrd. It defaults to disabled and requires explicit targets;
-`targets = [ "all" ];` selects all supported cards. `resume` defaults to false
-and requires separate validation of NVIDIA suspend-notifier ordering.
+`targets = [ "all" ];` selects all supported cards. `resume` defaults to true
+(matching the kernel module); set `resume = false` to disable re-unlock after suspend.
 
 ```sh
 sudo nixos-rebuild boot --flake .#myhost

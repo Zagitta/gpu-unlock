@@ -31,6 +31,23 @@
       checks.${system} = {
         kernel-module = module;
         firmware = module.firmware;
+        packaging-hashes =
+          let
+            lib = nixpkgs.lib;
+            pkgbuild = builtins.readFile ./packaging/arch/PKGBUILD;
+            spec = builtins.readFile ./packaging/rpm/gpu-unlock.spec;
+            makefile = builtins.readFile ./Makefile;
+          in
+          assert lib.hasInfix module.nvidiaVersion pkgbuild;
+          assert lib.hasInfix module.nvidiaVersion spec;
+          assert lib.hasInfix module.nvidiaVersion makefile;
+          assert lib.hasInfix module.nvidiaSourceSha256 pkgbuild;
+          assert lib.hasInfix module.nvidiaSourceSha256 spec;
+          assert lib.hasInfix module.nvidiaInstallerSha256 pkgbuild;
+          assert lib.hasInfix module.nvidiaInstallerSha256 spec;
+          pkgs.runCommand "gpu-unlock-packaging-hashes" { } ''
+            echo 'NVIDIA version and sha256 values match PKGBUILD, RPM spec, and Makefile' > $out
+          '';
         nixos-integration = import ./packaging/nix/checks.nix { inherit pkgs nixpkgs; };
       } // nixpkgs.lib.optionalAttrs hasScriptedInitrd {
         nixos-integration-scripted = import ./packaging/nix/checks.nix {

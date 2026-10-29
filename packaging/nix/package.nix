@@ -3,34 +3,41 @@
 let
   version = lib.removeSuffix "\n" (builtins.readFile ../../VERSION);
   nvidiaVersion = "610.43.03";
+  nvidiaSourceSha256 = "7e118923c7a23edc36114d63273a46e3e04e9af98695a42203e7ac2dfe9fc1dc";
+  nvidiaInstallerSha256 = "e084451db730a6df29d3d74f655749c4d236e3c945f7d94b5205e84318fe2f90";
   kernelBuild = "${kernel.dev}/lib/modules/${kernel.modDirVersion}/build";
   kbuildFlags = lib.escapeShellArgs kernelModuleMakeFlags;
-  # Build the source in this checkout, including downstream changes. Keep Nix
-  # metadata outside the source closure so updating flake.lock alone is cheap.
-  src = lib.fileset.toSource {
+  # Keep each derivation's source closure to what that build actually needs so
+  # packaging/docs edits do not rebuild the module or firmware.
+  firmwareSrc = lib.fileset.toSource {
     root = ../../.;
     fileset = lib.fileset.unions [
       ../../VERSION
       ../../Makefile
-      ../../README.md
-      ../../kernel
       ../../firmware
       ../../licenses
-      (lib.fileset.difference ../../packaging ./.)
-      ../../debian
+    ];
+  };
+  moduleSrc = lib.fileset.toSource {
+    root = ../../.;
+    fileset = lib.fileset.unions [
+      ../../kernel
+      ../../README.md
+      ../../licenses
     ];
   };
   nvidiaSource = fetchurl {
     url = "https://download.nvidia.com/XFree86/NVIDIA-kernel-module-source/NVIDIA-kernel-module-source-${nvidiaVersion}.tar.xz";
-    sha256 = "7e118923c7a23edc36114d63273a46e3e04e9af98695a42203e7ac2dfe9fc1dc";
+    sha256 = nvidiaSourceSha256;
   };
   nvidiaInstaller = fetchurl {
     url = "https://download.nvidia.com/XFree86/Linux-x86_64/${nvidiaVersion}/NVIDIA-Linux-x86_64-${nvidiaVersion}-no-compat32.run";
-    sha256 = "e084451db730a6df29d3d74f655749c4d236e3c945f7d94b5205e84318fe2f90";
+    sha256 = nvidiaInstallerSha256;
   };
   firmware = stdenv.mkDerivation {
     pname = "gpu-unlock-firmware";
-    inherit version src;
+    inherit version;
+    src = firmwareSrc;
     nativeBuildInputs = [ python3 zstd ];
     buildPhase = ''
       runHook preBuild
@@ -56,7 +63,8 @@ let
 in
 stdenv.mkDerivation {
   pname = "gpu-unlock";
-  inherit version src;
+  inherit version;
+  src = moduleSrc;
   nativeBuildInputs = kernel.moduleBuildDependencies;
   hardeningDisable = [ "pic" ];
   buildPhase = ''
@@ -75,7 +83,10 @@ stdenv.mkDerivation {
   '';
   # Kernel objects must not go through user-space ELF/RPATH fixups.
   dontFixup = true;
-  passthru = { inherit firmware; kernelVersion = kernel.modDirVersion; };
+  passthru = {
+    inherit firmware nvidiaVersion nvidiaSourceSha256 nvidiaInstallerSha256;
+    kernelVersion = kernel.modDirVersion;
+  };
   meta = {
     description = "Ampere pre-driver Tensor throughput unlock";
     homepage = "https://github.com/Zagitta/gpu-unlock";
