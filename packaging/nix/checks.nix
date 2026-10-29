@@ -1,0 +1,54 @@
+# SPDX-License-Identifier: GPL-2.0-only
+{ pkgs, nixpkgs, systemdInitrd ? true }:
+let
+  lib = nixpkgs.lib;
+  makeSystem = gpuUnlock: nixpkgs.lib.nixosSystem {
+    system = "x86_64-linux";
+    modules = [
+      ./module.nix
+      ({ options, ... }: {
+        nixpkgs.pkgs = pkgs;
+        system.stateVersion = "26.05";
+        boot.loader.grub.enable = false;
+        fileSystems."/" = { device = "none"; fsType = "tmpfs"; };
+        hardware.cpu.intel.updateMicrocode = false;
+        hardware.cpu.amd.updateMicrocode = false;
+        hardware.nvidia.gpuUnlock = gpuUnlock;
+        boot.initrd.systemd = lib.optionalAttrs
+          ((options.boot.initrd.systemd.enable.type.name or null) == "bool")
+          { enable = systemdInitrd; };
+      })
+    ];
+  };
+  enabled = (makeSystem { enable = true; targets = [ "0000:01:00.0" ]; }).config;
+  noResume = (makeSystem { enable = true; targets = [ "0000:01:00.0" ]; resume = false; }).config;
+  disabled = (makeSystem { enable = false; }).config;
+  invalid = (makeSystem { enable = true; }).config;
+  mixed = (makeSystem { enable = true; targets = [ "all" "0000:01:00.0" ]; }).config;
+  resumeWarned = cfg: builtins.any (lib.hasPrefix "hardware.nvidia.gpuUnlock.resume") cfg.warnings;
+  assertionsPass = cfg: builtins.all (a: a.assertion) cfg.assertions;
+in
+assert assertionsPass enabled;
+assert !assertionsPass invalid;
+assert !assertionsPass mixed;
+assert !(builtins.elem "gpu_unlock" disabled.boot.initrd.kernelModules);
+assert !(builtins.hasAttr "gpu-unlock" disabled.boot.initrd.systemd.services);
+assert builtins.filter (lib.hasPrefix "gpu_unlock.") disabled.boot.kernelParams == [ ];
+assert !(builtins.elem "gpu_unlock.resume=0" enabled.boot.kernelParams);
+assert builtins.elem "gpu_unlock.resume=0" noResume.boot.kernelParams;
+assert resumeWarned enabled && !resumeWarned noResume;
+assert enabled.system.build.gpuUnlock.kernelVersion == enabled.boot.kernelPackages.kernel.modDirVersion;
+pkgs.runCommand "gpu-unlock-nixos-integration-${if systemdInitrd then "systemd" else "scripted"}"
+{
+  nativeBuildInputs = [ pkgs.python3 pkgs.cpio pkgs.zstd pkgs.kmod ];
+}
+  ''
+    mkdir root
+    (cd root; zstd -dc ${enabled.system.build.initialRamdisk}/initrd | cpio --quiet -id --no-absolute-filenames)
+    python3 ${./check-initrd.py} root ${enabled.system.build.gpuUnlock.firmware} \
+      ${enabled.boot.kernelPackages.kernel.modDirVersion} \
+      ${if systemdInitrd then "systemd" else "scripted"}
+    mkdir -p $out
+    cp verified-initrd-ordering.txt $out/
+    echo 'module opt-in, target validation, kernel ABI, firmware hashes, and initrd ordering: PASS' > $out/result
+  ''
