@@ -28,8 +28,8 @@ in
 
     resume = lib.mkOption {
       type = lib.types.bool;
-      default = false;
-      description = "Reapply after suspend. Requires validated NVIDIA suspend-notifier ordering.";
+      default = true;
+      description = "Reapply after suspend (matches the kernel module default). Set false to pass gpu_unlock.resume=0.";
     };
   };
 
@@ -62,10 +62,9 @@ in
       };
     };
     boot.initrd.systemd.storePaths = lib.mkIf systemdInitrd [ "${pkgs.kmod}/bin/modprobe" ];
-    boot.kernelParams = [
-      "gpu_unlock.targets=${lib.concatStringsSep "," cfg.targets}"
-      "gpu_unlock.resume=${if cfg.resume then "1" else "0"}"
-    ];
+    # Leave resume off the cmdline when enabled so the module's own default applies.
+    boot.kernelParams = [ "gpu_unlock.targets=${lib.concatStringsSep "," cfg.targets}" ]
+      ++ lib.optional (!cfg.resume) "gpu_unlock.resume=0";
     system.build.gpuUnlock = cfg.package;
     system.build.gpuUnlockFirmware = cfg.package.firmware;
   };
