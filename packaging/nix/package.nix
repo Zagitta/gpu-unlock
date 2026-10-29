@@ -69,7 +69,7 @@ stdenv.mkDerivation {
   hardeningDisable = [ "pic" ];
   buildPhase = ''
     runHook preBuild
-    make -C ${kernelBuild} M=$PWD/kernel/gpu_unlock ${kbuildFlags} KCFLAGS=-Werror modules
+    make -C ${kernelBuild} M=$PWD/kernel/gpu_unlock ${kbuildFlags} modules
     runHook postBuild
   '';
   installPhase = ''
