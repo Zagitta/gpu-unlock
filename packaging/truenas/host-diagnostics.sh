@@ -17,7 +17,7 @@ mkdir -p "$OUT"
 	midclt call docker.config | python3 -c "import json,sys; print(json.load(sys.stdin)['nvidia'])"
 	for gpu in $(lspci -D -n -d 10de::0300 | cut -d' ' -f1); do
 		flr=no
-		lspci -vvv -s "$gpu" | grep -q 'FLReset+' && flr=yes
+		case "$(lspci -vvv -s "$gpu")" in *FLReset+*) flr=yes ;; esac
 		echo "card $gpu: $(lspci -nn -s "$gpu" | cut -d' ' -f2-)  FLReset+: $flr"
 	done
 } | tee "$OUT/report.txt"
