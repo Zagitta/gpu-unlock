@@ -176,7 +176,7 @@ built with `-c <config>` or a preset `_config`; put `gpu_unlock` right
 before `nvidia` in that config's `MODULES` yourself.
 - **initramfs-tools:** `/usr/share/initramfs-tools/modules.d/gpu-unlock.conf`.
 - **dracut:** `/usr/lib/dracut/dracut.conf.d/gpu-unlock.conf`.
-  
+
 With initramfs-tools and dracut, the module is built for every installed
 kernel that has headers, and those kernels' images are rebuilt on install
 and again on removal. Kernels installed later get the module and a new
