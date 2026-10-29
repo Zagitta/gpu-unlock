@@ -2,7 +2,7 @@
 { pkgs, nixpkgs, systemdInitrd ? true }:
 let
   lib = nixpkgs.lib;
-  makeSystem = enable: targets: nixpkgs.lib.nixosSystem {
+  makeSystem = gpuUnlock: nixpkgs.lib.nixosSystem {
     system = "x86_64-linux";
     modules = [
       ./module.nix
@@ -13,17 +13,19 @@ let
         fileSystems."/" = { device = "none"; fsType = "tmpfs"; };
         hardware.cpu.intel.updateMicrocode = false;
         hardware.cpu.amd.updateMicrocode = false;
-        hardware.nvidia.gpuUnlock = { inherit enable targets; };
+        hardware.nvidia.gpuUnlock = gpuUnlock;
         boot.initrd.systemd = lib.optionalAttrs
           ((options.boot.initrd.systemd.enable.type.name or null) == "bool")
           { enable = systemdInitrd; };
       })
     ];
   };
-  enabled = (makeSystem true [ "0000:01:00.0" ]).config;
-  disabled = (makeSystem false [ ]).config;
-  invalid = (makeSystem true [ ]).config;
-  mixed = (makeSystem true [ "all" "0000:01:00.0" ]).config;
+  enabled = (makeSystem { enable = true; targets = [ "0000:01:00.0" ]; }).config;
+  noResume = (makeSystem { enable = true; targets = [ "0000:01:00.0" ]; resume = false; }).config;
+  disabled = (makeSystem { enable = false; }).config;
+  invalid = (makeSystem { enable = true; }).config;
+  mixed = (makeSystem { enable = true; targets = [ "all" "0000:01:00.0" ]; }).config;
+  resumeWarned = cfg: builtins.any (lib.hasPrefix "hardware.nvidia.gpuUnlock.resume") cfg.warnings;
   assertionsPass = cfg: builtins.all (a: a.assertion) cfg.assertions;
 in
 assert assertionsPass enabled;
@@ -32,6 +34,9 @@ assert !assertionsPass mixed;
 assert !(builtins.elem "gpu_unlock" disabled.boot.initrd.kernelModules);
 assert !(builtins.hasAttr "gpu-unlock" disabled.boot.initrd.systemd.services);
 assert builtins.filter (lib.hasPrefix "gpu_unlock.") disabled.boot.kernelParams == [ ];
+assert !(builtins.elem "gpu_unlock.resume=0" enabled.boot.kernelParams);
+assert builtins.elem "gpu_unlock.resume=0" noResume.boot.kernelParams;
+assert resumeWarned enabled && !resumeWarned noResume;
 assert enabled.system.build.gpuUnlock.kernelVersion == enabled.boot.kernelPackages.kernel.modDirVersion;
 pkgs.runCommand "gpu-unlock-nixos-integration-${if systemdInitrd then "systemd" else "scripted"}"
 {

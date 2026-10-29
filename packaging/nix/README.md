@@ -36,6 +36,10 @@ Keep your existing NVIDIA configuration. The module builds against
 initrd. It defaults to disabled and requires explicit targets;
 `targets = [ "all" ];` selects all supported cards. `resume` defaults to true
 (matching the kernel module); set `resume = false` to disable re-unlock after suspend.
+Re-unlocking needs `hardware.nvidia.powerManagement.enable = true;`, which is off
+by default in NixOS, so the module warns if it is missing. The firmware is pinned to
+NVIDIA 610.43.03 only for the unlock itself; your running driver can be another
+version (tested with 595.71.05 and 615.71.09).
 
 ```sh
 sudo nixos-rebuild boot --flake .#myhost

@@ -44,6 +44,10 @@ in
         message = "The pinned gpu-unlock firmware package is currently validated only on x86_64-linux.";
       }
     ];
+    # Without it nvidia resumes the card during device resume, before the module's
+    # suspend notifier can unlock it again.
+    warnings = lib.optional (cfg.resume && !config.hardware.nvidia.powerManagement.enable)
+      "hardware.nvidia.gpuUnlock.resume needs hardware.nvidia.powerManagement.enable; otherwise cards stay locked after suspend. Enable it, or set resume = false.";
 
     boot.extraModulePackages = [ cfg.package ];
     hardware.firmware = [ cfg.package.firmware ];

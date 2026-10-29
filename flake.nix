@@ -29,7 +29,9 @@
       nixosModules.gpu-unlock = self.nixosModules.default;
 
       checks.${system} = {
-        kernel-module = module;
+        # Kbuild reads KCFLAGS from the environment. Keep -Werror out of the
+        # package so new warnings on users' kernels don't fail their builds.
+        kernel-module = module.overrideAttrs { env.KCFLAGS = "-Werror"; };
         firmware = module.firmware;
         packaging-hashes =
           let
