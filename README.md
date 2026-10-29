@@ -96,15 +96,15 @@ Then append `gpu_unlock.targets=all` to your kernel command line, keeping
 existing options:
 
 - **GRUB (Debian/Ubuntu/Mint):** add it inside `GRUB_CMDLINE_LINUX_DEFAULT`
-in `/etc/default/grub`, then run `sudo update-grub`.
+in `/etc/default/grub`, then run `sudo update-grub`
 - **GRUB (Arch/CachyOS):** same edit, then run
-`sudo grub-mkconfig -o /boot/grub/grub.cfg`.
+`sudo grub-mkconfig -o /boot/grub/grub.cfg`
 - **Fedora/RHEL:** run
-`sudo grubby --update-kernel=ALL --args="gpu_unlock.targets=all"`.
+`sudo grubby --update-kernel=ALL --args="gpu_unlock.targets=all"`
 - **systemd-boot:** append it to the `options` line in your boot entry
-(`bootctl status` shows its location).
+(`bootctl status` shows its location)
 - **UKI / generated entries:** add it to `/etc/kernel/cmdline` and regenerate
-your boot images/entries (e.g. `sudo mkinitcpio -P` for mkinitcpio UKIs).
+your boot images/entries (e.g. `sudo mkinitcpio -P` for mkinitcpio UKIs)
 
 # FAQ
 
