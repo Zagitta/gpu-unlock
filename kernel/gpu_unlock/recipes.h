@@ -62,6 +62,10 @@ struct gu_family {
 	u8 fwsec_version;
 	u32 feat_plm, feat_ss0, feat_ss1;
 	bool turing_layout; /* VBIOS FB-range register and no MMU lock */
+	/* The Booter's own privileged writes can set the host table's selectors, so
+	 * direct mode never opens a PLM. The Booter runs heavy-secure (L3), which the
+	 * power-on FEAT PLM already lets write them. */
+	bool direct_selectors;
 };
 struct gu_card {
 	u16 device;

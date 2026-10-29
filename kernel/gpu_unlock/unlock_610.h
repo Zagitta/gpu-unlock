@@ -12,12 +12,13 @@
  * otherwise a negative errno. A failed transaction may have applied a prefix
  * of the table: it must not be reported as ready. If quiescence cannot be
  * established, DMA buffers and BAR ownership are retained until power off.
- * After resume,
- * -EALREADY means the card kept power and is still unlocked, and nothing was
- * written. Unlocks of different cards may run concurrently with the same
- * shared firmware.
+ * -EALREADY means the card is still unlocked from earlier this power cycle
+ * (it kept power across a reboot or a sleep), and nothing was written.
+ * direct lets a family whose Booter reaches the selectors write them in its
+ * single launch without opening any PLM. Unlocks of different cards may run
+ * concurrently with the same shared firmware.
  */
 int gpu_unlock_610_unlock(const struct gu_device *device, const struct gpu_unlock_610_shared *shared,
-			  bool resume);
+			  bool resume, bool direct);
 
 #endif

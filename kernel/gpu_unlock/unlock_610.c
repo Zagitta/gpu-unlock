@@ -2,8 +2,11 @@
 /*
  * Pre-driver V67 unlock, run before the stock driver binds: FWSEC-FRTS from
  * the board ROM, Booter with the V67 signature, the SS0/SS1 selector writes, then
- * FLR so the stock driver starts from a clean, halted GSP. After resume from
- * suspend it runs again on the card nvidia has suspended, before nvidia resumes it.
+ * FLR so the stock driver starts from a clean, halted GSP. In direct mode the
+ * Booter writes the selectors itself in its single launch and no PLM is ever
+ * opened; otherwise it opens the PLMs and the host writes the selectors. After
+ * resume from suspend it runs again on the card nvidia has suspended, before
+ * nvidia resumes it.
  */
 #include <linux/version.h>
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)
@@ -81,6 +84,8 @@ struct unlock_transaction_work {
 	int last_pci_error;
 	bool last_pci_cap;
 	u32 target_addr, target_value;
+	bool direct; /* the Booter writes the selectors; no PLM is opened */
+	u32 entry_feat_plm, entry_wpr_cfg_plm; /* power-on values, for the log */
 };
 
 struct gu_boot_state {
@@ -958,6 +963,12 @@ static int unlock_transaction_gfw(struct unlock_transaction_work *work)
 			/* An open PLM means the card was already unlocked or not cold. */
 			if (plm == ~0u)
 				return GU_RESULT(-EALREADY);
+			/* Selectors still unlocked: a direct-mode unlock earlier this power
+			 * cycle, which leaves no open PLM to recognise it by. */
+			if (ss0 == GU_SS0_UNLOCK && ss1 == GU_SS1_UNLOCK)
+				return GU_RESULT(-EALREADY);
+			work->entry_feat_plm = plm;
+			read_bar(work, GU_WPR_CFG_PLM_OFFSET, &work->entry_wpr_cfg_plm);
 			/* WPR2 is down from power-on until FWSEC-FRTS runs. An enabled
 			 * WPR2 means a driver has already used the card this power
 			 * cycle; starting FWSEC and Booter again from here is untested.
@@ -1206,8 +1217,11 @@ static int table_failure(struct unlock_transaction_work *work, const char *phase
 		work->attempt, entry->addr, entry->value, observed, ret);
 	return GU_RESULT(ret);
 }
+/* frts_restorable: the host may rewrite the WPR2 carve, which needs WPR_CFG
+ * open. Without it there is no retry (its refill restores the carve first)
+ * and no final restore; the FLR clears WPR2 either way. */
 static int run_privileged_writes(struct unlock_transaction_work *work,
-				 const struct gu_write_table *table)
+				 const struct gu_write_table *table, bool frts_restorable)
 {
 	const size_t per_launch = work->payload->writes;
 	struct gu_reg_write batch[GU_PAYLOAD_MAX_WRITES];
@@ -1235,7 +1249,8 @@ static int run_privileged_writes(struct unlock_transaction_work *work,
 		entry = &batch[0];
 		matched = false;
 		work->write_index = i;
-		for (work->attempt = 1; work->attempt <= 2; work->attempt++) {
+		for (work->attempt = 1; work->attempt <= (frts_restorable ? 2u : 1u);
+		     work->attempt++) {
 			u32 before, lo = 0, hi = 0, ctl = 0, engine = 0;
 			struct gu_boot_state st;
 
@@ -1340,6 +1355,8 @@ static int run_privileged_writes(struct unlock_transaction_work *work,
 			return table_failure(work, "readback-exhausted",
 					     &table->entries[i + count - 1], after, -EIO);
 	}
+	if (!frts_restorable)
+		return 0;
 	ret = restore_frts(work);
 	return ret && table->count ?
 		table_failure(work, "final-FRTS", &table->entries[table->count - 1], after, ret) : ret;
@@ -1565,6 +1582,16 @@ static int unlock_transaction_reset(struct unlock_transaction_work *work)
 	work->state = GU_QUIESCED;
 	if (ss0 != GU_SS0_UNLOCK || ss1 != GU_SS1_UNLOCK)
 		return GU_RESULT(-EIO);
+	{
+		u32 wpr_cfg = 0;
+
+		read_bar(work, GU_WPR_CFG_PLM_OFFSET, &wpr_cfg);
+		dev_info(&work->pdev->dev,
+			 "gpu_unlock: stage=plm mode=%s feat=%#x/%#x wpr_cfg=%#x/%#x untouched=%u\n",
+			 work->direct ? "direct" : "plm", plm, work->entry_feat_plm,
+			 wpr_cfg, work->entry_wpr_cfg_plm,
+			 plm == work->entry_feat_plm && wpr_cfg == work->entry_wpr_cfg_plm);
+	}
 	dev_info(&work->pdev->dev,
 		 "gpu_unlock: stage=flr post_wpr2=%#x:%#x ss0=%#x ss1=%#x plm=%#x cmd=%#x devsta=%#x chip=%#x\n",
 		 lo, hi, ss0, ss1, plm, command, pending, chip);
@@ -1572,7 +1599,7 @@ static int unlock_transaction_reset(struct unlock_transaction_work *work)
 }
 
 int gpu_unlock_610_unlock(const struct gu_device *device, const struct gpu_unlock_610_shared *shared,
-			  bool resume)
+			  bool resume, bool direct)
 {
 	struct pci_dev *pdev = device->pdev;
 	struct unlock_transaction_work *work;
@@ -1607,6 +1634,7 @@ int gpu_unlock_610_unlock(const struct gu_device *device, const struct gpu_unloc
 		 work->card->family->privileged.count, work->card->family->host.count,
 		 work->card->family->booter->launch);
 	work->resume = resume;
+	work->direct = direct && work->card->family->direct_selectors;
 	/* After resume GFW may still be running: check and wait before reading
 	 * the layout. Firmware preparation has already completed for the round. */
 	ret = resume ? unlock_transaction_suspended(work) : 0;
@@ -1636,11 +1664,16 @@ int gpu_unlock_610_unlock(const struct gu_device *device, const struct gpu_unloc
 		ret = unlock_transaction_fwsec(work);
 	if (!ret)
 		ret = publish_signature(work);
+	/* Direct: the Booter writes SS0/SS1 in its one launch, and the PLMs keep
+	 * their power-on values. A second launch in one power cycle does not halt
+	 * on GA102, so there is no later pass to close opened PLMs again. */
 	if (!ret)
-		ret = run_privileged_writes(work, &work->card->family->privileged);
+		ret = work->direct ?
+			run_privileged_writes(work, &work->card->family->host, false) :
+			run_privileged_writes(work, &work->card->family->privileged, true);
 	if (!ret)
 		ret = restore_stock_signature(work);
-	if (!ret)
+	if (!ret && !work->direct)
 		ret = run_host_writes(work, &work->card->family->host);
 	if (!ret)
 		ret = unlock_transaction_reset(work);

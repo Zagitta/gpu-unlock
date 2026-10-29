@@ -341,6 +341,7 @@ static const struct gu_family ga10x = {
 	.feat_plm = GU_FEAT_PLM_OFFSET,
 	.feat_ss0 = GU_FEAT_SS0_OFFSET,
 	.feat_ss1 = GU_FEAT_SS1_OFFSET,
+	.direct_selectors = true,
 };
 static const struct gu_family ad10x = {
 	.name = "AD102/AD103/AD104/AD106/AD107",

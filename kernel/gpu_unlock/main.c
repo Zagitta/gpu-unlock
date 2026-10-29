@@ -15,6 +15,10 @@ static char *targets;
 module_param(targets, charp, 0444);
 MODULE_PARM_DESC(targets, "\"all\" or comma-separated PCI addresses of supported Ampere cards to unlock");
 
+static bool direct = true;
+module_param(direct, bool, 0444);
+MODULE_PARM_DESC(direct, "GA10x: write the speed selectors from the signed Booter itself, never opening the privilege masks (default: on)");
+
 static bool resume = true;
 module_param(resume, bool, 0644);
 MODULE_PARM_DESC(resume, "Unlock the cards again after resume from suspend, which powers them off (default: on)");
@@ -51,7 +55,7 @@ static void unlock_one(void *data, async_cookie_t cookie)
 	int ret;
 
 	pci_dev_lock(pdev);
-	ret = pdev->driver ? -EBUSY : gpu_unlock_610_unlock(&card->device, &shared, false);
+	ret = pdev->driver ? -EBUSY : gpu_unlock_610_unlock(&card->device, &shared, false, direct);
 	pci_dev_unlock(pdev);
 	if (ret)
 		pci_err(pdev, "gpu_unlock: unlock failed (%d)\n", ret);
@@ -72,7 +76,7 @@ static void unlock_again(void *data, async_cookie_t cookie)
 	pci_dev_lock(pdev);
 	nvidia = pdev->driver && !strcmp(pdev->driver->name, "nvidia");
 	if (nvidia)
-		ret = gpu_unlock_610_unlock(&card->device, &shared, true);
+		ret = gpu_unlock_610_unlock(&card->device, &shared, true, direct);
 	pci_dev_unlock(pdev);
 	if (!nvidia)
 		pci_info(pdev, "gpu_unlock: not bound to nvidia, left as is after resume\n");
