@@ -1,16 +1,16 @@
 ![gpu-unlock: full-speed tensor cores for GeForce RTX](assets/banner.svg)
 
-### Your GeForce runs AI at half speed. This fixes it.
+### Your GeForce GPU runs AI at half its speed. This fixes it.
 
-![Version](https://img.shields.io/badge/version-2.0.0-76b900)![RTX 20 | 30 | 40](https://img.shields.io/badge/GeForce-RTX%2020%20%7C%2030%20%7C%2040-76b900?logo=nvidia&logoColor=white)![Linux](https://img.shields.io/badge/platform-Linux-informational?logo=linux&logoColor=white)![License GPL-2.0](https://img.shields.io/badge/license-GPL--2.0-blue)![Stars](https://img.shields.io/github/stars/Zagitta/gpu-unlock?style=flat&color=yellow)
+![Version](https://img.shields.io/badge/version-2.0.0-76b900) ![RTX 20 | 30 | 40](https://img.shields.io/badge/GeForce-RTX%2020%20%7C%2030%20%7C%2040-76b900?logo=nvidia&logoColor=white) ![Linux](https://img.shields.io/badge/platform-Linux-informational?logo=linux&logoColor=white) ![License GPL-2.0](https://img.shields.io/badge/license-GPL--2.0-blue) ![Stars](https://img.shields.io/github/stars/Zagitta/gpu-unlock?style=flat&color=yellow)
 
 **Up to 2× FP16 / BF16 / TF32 tensor throughput** · **+25–55% LLM prefill** · **+25–50% fine-tuning** · **+30–55% image generation**
 
-[Supported GPUs](#supported-gpus) · [Benchmarks](#what-you-get) · [Install](#how-to-install) · [FAQ](#faq) · [Support](#support-me)
+[Supported GPUs](#supported-gpus) · [Benchmarks](#what-you-get) · [Install](#how-to-install) · [FAQ](#faq) · [Support](#support-me) · [Uninstall](#uninstall)
 
 ---
 
-NVIDIA ships GeForce cards with their tensor cores capped to **half speed** for
+NVIDIA ships consumer GeForce cards with their tensor cores capped to **half speed** for
 FP16, BF16 and TF32 math with FP32 accumulation, which is what nearly all AI
 training and unquantized inference uses. The same silicon sold as an RTX A-series
 or professional card runs at full rate. `gpu_unlock` removes that cap at boot,
@@ -95,16 +95,24 @@ make install
 Then append `gpu_unlock.targets=all` to your kernel command line, keeping
 existing options:
 
-- **GRUB (Debian/Ubuntu/Mint):** add it inside `GRUB_CMDLINE_LINUX_DEFAULT`
-in `/etc/default/grub`, then run `sudo update-grub`.
-- **GRUB (Arch/CachyOS):** same edit, then run
-`sudo grub-mkconfig -o /boot/grub/grub.cfg`.
-- **Fedora/RHEL:** run
-`sudo grubby --update-kernel=ALL --args="gpu_unlock.targets=all"`.
-- **systemd-boot:** append it to the `options` line in your boot entry
+- **GRUB (Debian / Ubuntu / Mint):** add `gpu_unlock.targets=all` inside `GRUB_CMDLINE_LINUX_DEFAULT` in `/etc/default/grub`, then run
+  ```sh
+  sudo update-grub
+  ```
+- **GRUB (Arch / CachyOS):** add `gpu_unlock.targets=all` inside `GRUB_CMDLINE_LINUX_DEFAULT` in `/etc/default/grub`, then run
+  ```sh
+  sudo grub-mkconfig -o /boot/grub/grub.cfg
+  ```
+- **Fedora / RHEL:** run
+  ```sh
+  sudo grubby --update-kernel=ALL --args="gpu_unlock.targets=all"
+  ```
+- **systemd-boot:** append `gpu_unlock.targets=all` to the `options` line in your boot entry
 (`bootctl status` shows its location).
-- **UKI / generated entries:** add it to `/etc/kernel/cmdline` and regenerate
+- **UKI / generated entries:** add `gpu_unlock.targets=all` to `/etc/kernel/cmdline` and regenerate
 your boot images/entries (e.g. `sudo mkinitcpio -P` for mkinitcpio UKIs).
+- **Limine:** append `gpu_unlock.targets=all` to cmdline in `/boot/limine/limine.conf`.
+- **rEFInd:** append `gpu_unlock.targets=all` to "Boot using default options" in `/boot/refind_linux.conf`.
 
 # FAQ
 
@@ -230,9 +238,16 @@ journalctl -k -b | grep gpu_unlock
 lspci -nnk -s 0000:[ID]:00.0
 ```
 
+## Uninstall
 To stop unlocking, remove `gpu_unlock.targets=` from the kernel command line;
 for a one-off boot, delete it in the bootloader's edit screen. Removing the
 packages also removes the module and the initramfs drop-ins.
+
+```sh
+sudo pacman -Rns gpu-unlock-firmware gpu-unlock-dkms            # Arch
+sudo dnf remove --alldeps gpu-unlock-firmware gpu-unlock-dkms   # Fedora / RHEL
+sudo apt-get purge gpu-unlock-firmware gpu-unlock-dkms          # Debian / Ubuntu / Mint
+```
 
 If the firmware on a card never stops, the module logs it and keeps the DMA
 buffers that firmware may still use until the next power off. Power off
