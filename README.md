@@ -95,15 +95,15 @@ make install
 Then append `gpu_unlock.targets=all` to your kernel command line, keeping
 existing options:
 
-- **GRUB (Debian/Ubuntu/Mint):** add `gpu_unlock.targets=all` inside `GRUB_CMDLINE_LINUX_DEFAULT` in `/etc/default/grub`, then run
+- **GRUB (Debian / Ubuntu / Mint):** add `gpu_unlock.targets=all` inside `GRUB_CMDLINE_LINUX_DEFAULT` in `/etc/default/grub`, then run
   ```sh
   sudo update-grub
   ```
-- **GRUB (Arch/CachyOS):** add `gpu_unlock.targets=all` inside `GRUB_CMDLINE_LINUX_DEFAULT` in `/etc/default/grub`, then run
+- **GRUB (Arch / CachyOS):** add `gpu_unlock.targets=all` inside `GRUB_CMDLINE_LINUX_DEFAULT` in `/etc/default/grub`, then run
   ```sh
   sudo grub-mkconfig -o /boot/grub/grub.cfg
   ```
-- **Fedora/RHEL:** run
+- **Fedora / RHEL:** run
   ```sh
   sudo grubby --update-kernel=ALL --args="gpu_unlock.targets=all"
   ```
@@ -245,8 +245,8 @@ packages also removes the module and the initramfs drop-ins.
 
 ```sh
 sudo pacman -Rns gpu-unlock-firmware gpu-unlock-dkms            # Arch
-sudo dnf remove --alldeps gpu-unlock-firmware gpu-unlock-dkms   # Fedora
-sudo apt-get purge gpu-unlock-firmware gpu-unlock-dkms          # Debian / Ubuntu
+sudo dnf remove --alldeps gpu-unlock-firmware gpu-unlock-dkms   # Fedora / RHEL
+sudo apt-get purge gpu-unlock-firmware gpu-unlock-dkms          # Debian / Ubuntu / Mint
 ```
 
 If the firmware on a card never stops, the module logs it and keeps the DMA
