@@ -66,8 +66,11 @@ def extract_members(installer: Path, names: tuple[str, ...]) -> dict[str, bytes]
         stream.seek(offset)
         process = subprocess.Popen(["zstd", "-dc"], stdin=stream, stdout=subprocess.PIPE)
         try:
-            with tarfile.open(fileobj=process.stdout, mode="r|") as archive:
-                result = read_members(archive, names)
+            try:
+                with tarfile.open(fileobj=process.stdout, mode="r|") as archive:
+                    result = read_members(archive, names)
+            except tarfile.TarError as error:
+                raise ValueError("installer payload is not a zstd tar archive") from error
             if process.wait() != 0:
                 raise ValueError("zstd could not read the installer payload")
             return result
