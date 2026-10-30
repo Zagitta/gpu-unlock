@@ -30,3 +30,8 @@ u16 gpu_unlock_command_restore(u16 original, u16 live)
 
 	return (live & (u16)~mask) | (original & mask);
 }
+
+bool gpu_unlock_pmcsr_d0(u16 pmcsr)
+{
+	return (pmcsr & GU_PCI_PM_CTRL_STATE_MASK) == GU_PCI_PM_STATE_D0;
+}
