@@ -71,6 +71,7 @@ struct unlock_transaction_work {
 	unsigned int attempt;
 	u32 frts_lo, frts_hi;
 	bool frts_saved, invocation_halted;
+	bool flr_attempted;
 	bool firmware_started;
 	bool retained;
 	bool error_reported;
@@ -1460,22 +1461,28 @@ static int wait_post_flr_gfw(struct unlock_transaction_work *work)
 	return GU_RESULT(ret);
 }
 
-static int unlock_transaction_reset(struct unlock_transaction_work *work)
+/* contain: a transaction already failed after firmware started. Run the same
+ * FLR and post-FLR checks so the card goes to the stock driver at stock speed;
+ * the selectors may hold any value. If any check fails the card stays retained.
+ */
+static int unlock_transaction_reset(struct unlock_transaction_work *work, bool contain)
 {
 	u32 identity, bar, lo, hi, ss0, ss1, plm, chip, cpuctl;
 	u16 command, pending;
 	unsigned int i;
 	int ret;
 
-	if (work->state != GU_STOCK)
+	if (work->state != GU_STOCK && !(contain && work->state == GU_ALLOCATED))
 		return GU_RESULT(-EPROTO);
-	if (read_bar(work, work->card->family->feat_ss0, &ss0) || ss0 == ~0u ||
-	    read_bar(work, work->card->family->feat_ss1, &ss1) || ss1 == ~0u)
-		return GU_RESULT(-ENODEV);
-	dev_dbg(&work->pdev->dev, "pre-FLR selectors: ss0=%#x expected=%#x ss1=%#x expected=%#x\n",
-		ss0, GU_SS0_UNLOCK, ss1, GU_SS1_UNLOCK);
-	if (ss0 != GU_SS0_UNLOCK || ss1 != GU_SS1_UNLOCK)
-		return GU_RESULT(-EIO);
+	if (!contain) {
+		if (read_bar(work, work->card->family->feat_ss0, &ss0) || ss0 == ~0u ||
+		    read_bar(work, work->card->family->feat_ss1, &ss1) || ss1 == ~0u)
+			return GU_RESULT(-ENODEV);
+		dev_dbg(&work->pdev->dev, "pre-FLR selectors: ss0=%#x expected=%#x ss1=%#x expected=%#x\n",
+			ss0, GU_SS0_UNLOCK, ss1, GU_SS1_UNLOCK);
+		if (ss0 != GU_SS0_UNLOCK || ss1 != GU_SS1_UNLOCK)
+			return GU_RESULT(-EIO);
+	}
 	pci_clear_master(work->pdev);
 	work->master = false;
 	if (diag_pci_word(work, false, PCI_COMMAND, &command) ||
@@ -1504,6 +1511,7 @@ static int unlock_transaction_reset(struct unlock_transaction_work *work)
 			return GU_RESULT(ret);
 	}
 	dev_dbg(&work->pdev->dev, "PCIe FLR begin: BME=0 DMA retained, chip=%#x\n", chip);
+	work->flr_attempted = true;
 	ret = pcie_flr(work->pdev);
 	dev_dbg(&work->pdev->dev, "PCIe FLR returned: result=%d\n", ret);
 	if (ret)
@@ -1563,6 +1571,12 @@ static int unlock_transaction_reset(struct unlock_transaction_work *work)
 		return GU_RESULT(-EBUSY);
 	}
 	work->state = GU_QUIESCED;
+	if (contain) {
+		dev_info(&work->pdev->dev,
+			 "gpu_unlock: stage=contain post_wpr2=%#x:%#x ss0=%#x ss1=%#x plm=%#x; card handed back at stock speed\n",
+			 lo, hi, ss0, ss1, plm);
+		return 0;
+	}
 	if (ss0 != GU_SS0_UNLOCK || ss1 != GU_SS1_UNLOCK)
 		return GU_RESULT(-EIO);
 	dev_info(&work->pdev->dev,
@@ -1643,10 +1657,15 @@ int gpu_unlock_610_unlock(const struct gu_device *device, const struct gpu_unloc
 	if (!ret)
 		ret = run_host_writes(work, &work->card->family->host);
 	if (!ret)
-		ret = unlock_transaction_reset(work);
+		ret = unlock_transaction_reset(work, false);
 	/* Never leave the V67 signature published for a later stock boot. */
 	if (ret && (work->state == GU_PUBLISHED || work->state == GU_ACTIVE))
 		restore_stock_signature(work);
+	/* A failure after firmware started would otherwise keep the card until
+	 * power off. Try the FLR containment a success uses, once. */
+	if (ret && work->firmware_started && !work->flr_attempted &&
+	    (work->state == GU_STOCK || work->state == GU_ALLOCATED))
+		unlock_transaction_reset(work, true);
 	work->error_reported = false;
 	cleanup = unlock_transaction_unwind(work);
 	if (!ret)
