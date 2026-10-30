@@ -206,9 +206,127 @@ int gu_falcon_dma(const struct gu_falcon_io *io, u32 base, u32 dest, u32 mem_off
 	return gu_falcon_poll(io, base + GU_FALCON_DMATRFCMD_OFFSET, 2, 2, 1000000, true, NULL);
 }
 
+/* Optional DMA capture buffer for debugging/analysis.
+ * Caller enables it before calling gu_falcon_hs() to snapshot
+ * the source buffer before the GPU DMA reads it. */
+static u32 *dma_capture_buf;
+static size_t dma_capture_size;
+static bool dma_capture_enabled;
+static const u32 *dma_capture_src;
+
+void gu_falcon_dma_capture_enable(u32 *buf, size_t size, const u32 *src)
+{
+	dma_capture_buf = buf;
+	dma_capture_size = size;
+	dma_capture_src = src;
+	dma_capture_enabled = true;
+}
+
+void gu_falcon_dma_capture_disable(void)
+{
+	dma_capture_enabled = false;
+}
+
+size_t gu_falcon_dma_capture_size(void)
+{
+	return dma_capture_size;
+}
+
 int gu_falcon_hs(const struct gu_falcon_io *io, const struct gu_falcon_engine *eng,
 		 const struct gu_falcon_hs_image *program,
 		 struct gu_falcon_evidence *evidence)
+{
+	u32 trans, cpuctl;
+	dma_addr_t code_src;
+	int ret;
+
+	memset(evidence, 0, sizeof(*evidence));
+	if (program->dma > ~0ull - program->code_off ||
+	    program->dma + program->code_off < program->code_va ||
+	    program->dma > ~0ull - program->data_off)
+		return -ERANGE;
+	code_src = program->dma + program->code_off - program->code_va;
+	if (!falcon_dma_valid(program->code_pa, program->code_va, code_src, program->code_size) ||
+	    (program->data_size && !falcon_dma_valid(program->data_pa, 0,
+						  program->dma + program->data_off, program->data_size)))
+		return -EINVAL;
+	ret = gu_falcon_reset(io, eng, evidence);
+	if (ret)
+		return ret;
+	ret = gu_falcon_poll(io, eng->base + GU_FALCON_CPUCTL_OFFSET, 16, 0, 1000,
+			     !program->stale_halt_ok, NULL);
+	if (ret && !(ret == -ETIMEDOUT && program->stale_halt_ok))
+		return ret;
+	if (falcon_read(io, eng->fbif + GU_FBIF_CTL_OFFSET, &trans) || inaccessible(trans))
+		return -EIO;
+	trans |= 1u << 7;
+	falcon_write(io, eng->fbif + GU_FBIF_CTL_OFFSET, trans);
+	falcon_write(io, eng->base + GU_FALCON_DMACTL_OFFSET, 0);
+	if (falcon_read(io, eng->fbif + GU_FBIF_TRANSCFG(0), &trans) || inaccessible(trans))
+		return -ENODEV;
+	trans = (trans & ~7u) | 5u;
+	falcon_write(io, eng->fbif + GU_FBIF_TRANSCFG(0), trans);
+	dma_wmb();
+	if (program->os_code_size) {
+		ret = gu_falcon_dma(io, eng->base, 0, 0,
+				    program->dma + program->os_code_off, program->os_code_size,
+				    gpu_unlock_dma_cmd(true, false));
+		if (ret)
+			return ret;
+	}
+	/* Optional DMA capture: snapshot source buffer before GPU reads it.
+	 * Useful for debugging firmware loading and analyzing SEC2 images. */
+	if (dma_capture_enabled && dma_capture_buf && dma_capture_src &&
+	    program->code_size <= dma_capture_size) {
+		memcpy(dma_capture_buf, dma_capture_src, program->code_size);
+		dev_dbg(io->dev, "DMA capture: saved %u bytes before transfer\n",
+			program->code_size);
+	}
+	ret = gu_falcon_dma(io, eng->base, program->code_pa, program->code_va, code_src,
+			 program->code_size, gpu_unlock_dma_cmd(true, true));
+	if (ret)
+		return ret;
+	if (program->data_size) {
+		ret = gu_falcon_dma(io, eng->base, program->data_pa, 0,
+				    program->dma + program->data_off, program->data_size,
+				    gpu_unlock_dma_cmd(false, false));
+		if (ret)
+			return ret;
+	}
+	evidence->reloaded = true;
+	falcon_write(io, eng->falcon2 + GU_FALCON2_BROM_PARAADDR_OFFSET, program->sig_dmem);
+	falcon_write(io, eng->falcon2 + GU_FALCON2_BROM_ENGIDMASK_OFFSET, program->engine_mask);
+	falcon_write(io, eng->falcon2 + GU_FALCON2_BROM_CURR_UCODE_ID_OFFSET, program->ucode_id & 0xff);
+	falcon_write(io, eng->falcon2 + GU_FALCON2_MOD_SEL_OFFSET, 1);
+	falcon_write(io, eng->base + GU_FALCON_BOOTVEC_OFFSET, program->code_va);
+	falcon_write(io, eng->base + GU_FALCON_MAILBOX0_OFFSET, program->mailbox0);
+	falcon_write(io, eng->base + GU_FALCON_MAILBOX1_OFFSET, program->mailbox1);
+	if (falcon_read(io, eng->base + GU_FALCON_CPUCTL_OFFSET, &cpuctl) || inaccessible(cpuctl))
+		return -EIO;
+	dev_dbg(io->dev, "Falcon start: base=%#x cpuctl=%#x code_va=%#x sig_dmem=%#x engine_mask=%#x ucode=%u mailbox=%#x:%#x\n",
+		eng->base, cpuctl, program->code_va, program->sig_dmem, program->engine_mask,
+		program->ucode_id, program->mailbox1, program->mailbox0);
+	evidence->started = true;
+	if (cpuctl & (1u << 6))
+		falcon_write(io, eng->base + GU_FALCON_CPUCTL_ALIAS_OFFSET, 1u << 1);
+	else
+		falcon_write(io, eng->base + GU_FALCON_CPUCTL_OFFSET, 1u << 1);
+
+	ret = gu_falcon_poll(io, eng->base + GU_FALCON_CPUCTL_OFFSET,
+			     1u << 4, 1u << 4, 5000000, true, NULL);
+	if (ret)
+		return ret;
+	evidence->halted = true;
+	return 0;
+}
+
+/* gu_falcon_hs_probe: same as gu_falcon_hs but returns immediately after
+ * CPU start instead of waiting for halt. This allows callers to inspect
+ * GPU state, capture DMA transfers, or analyze firmware before the SEC2
+ * processor completes its boot sequence. */
+int gu_falcon_hs_probe(const struct gu_falcon_io *io, const struct gu_falcon_engine *eng,
+		       const struct gu_falcon_hs_image *program,
+		       struct gu_falcon_evidence *evidence)
 {
 	u32 trans, cpuctl;
 	dma_addr_t code_src;
@@ -269,21 +387,12 @@ int gu_falcon_hs(const struct gu_falcon_io *io, const struct gu_falcon_engine *e
 	falcon_write(io, eng->base + GU_FALCON_MAILBOX1_OFFSET, program->mailbox1);
 	if (falcon_read(io, eng->base + GU_FALCON_CPUCTL_OFFSET, &cpuctl) || inaccessible(cpuctl))
 		return -EIO;
-	dev_dbg(io->dev, "Falcon start: base=%#x cpuctl=%#x code_va=%#x sig_dmem=%#x engine_mask=%#x ucode=%u mailbox=%#x:%#x\n",
-		eng->base, cpuctl, program->code_va, program->sig_dmem, program->engine_mask,
-		program->ucode_id, program->mailbox1, program->mailbox0);
 	evidence->started = true;
-	if (cpuctl & (1u << 6))
-		falcon_write(io, eng->base + GU_FALCON_CPUCTL_ALIAS_OFFSET, 1u << 1);
-	else
-		falcon_write(io, eng->base + GU_FALCON_CPUCTL_OFFSET, 1u << 1);
-
-	ret = gu_falcon_poll(io, eng->base + GU_FALCON_CPUCTL_OFFSET,
-			     1u << 4, 1u << 4, 5000000, true, NULL);
-	if (ret)
-		return ret;
-	evidence->halted = true;
-	return 0;
+	falcon_write(io, eng->base + ((cpuctl & 64) ? GU_FALCON_CPUCTL_ALIAS_OFFSET :
+						GU_FALCON_CPUCTL_OFFSET), 2);
+	ret = gu_falcon_poll(io, eng->base + GU_FALCON_CPUCTL_OFFSET, 16, 16, 5000000, true, NULL);
+	evidence->halted = !ret;
+	return ret;
 }
 
 /* TU102/GA100 generic loader for board FWSEC v2. Descriptor offsets are
