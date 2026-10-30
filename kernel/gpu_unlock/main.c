@@ -13,7 +13,7 @@
 
 static char *targets;
 module_param(targets, charp, 0444);
-MODULE_PARM_DESC(targets, "\"all\" or comma-separated PCI addresses of supported Ampere cards to unlock");
+MODULE_PARM_DESC(targets, "\"all\" or comma-separated PCI addresses of supported Turing, Ampere, and Ada cards to unlock");
 
 static bool resume = true;
 module_param(resume, bool, 0644);
@@ -212,5 +212,5 @@ static void __exit gpu_unlock_exit(void)
 module_init(gpu_unlock_init);
 module_exit(gpu_unlock_exit);
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("Ampere pre-driver hardware unlock");
+MODULE_DESCRIPTION("Turing, Ampere, and Ada pre-driver hardware unlock");
 MODULE_VERSION("2.0.0");

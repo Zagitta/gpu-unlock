@@ -3,7 +3,7 @@
 Name: gpu-unlock
 Version: 2.0.0
 Release: 1%{?dist}
-Summary: RTX 3090 BF16 unlock before the NVIDIA driver loads
+Summary: Turing, Ampere, and Ada BF16 unlock before the NVIDIA driver loads
 License: GPL-2.0-only
 BuildArch: noarch
 Source0: gpu-unlock-%{version}.tar.xz
@@ -18,11 +18,11 @@ BuildRequires: python3
 BuildRequires: zstd
 
 %description
-Kernel module that unlocks RTX 3090 BF16 throughput before the unmodified
-NVIDIA driver binds, opted in on the kernel command line.
+Kernel module that unlocks Turing, Ampere, and Ada BF16 throughput before
+the unmodified NVIDIA driver binds, opted in on the kernel command line.
 
 %package dkms
-Summary: RTX 3090 BF16 unlock kernel source
+Summary: Turing, Ampere, and Ada BF16 unlock kernel source
 Requires: dkms
 Requires(post): dkms
 Requires(preun): dkms
