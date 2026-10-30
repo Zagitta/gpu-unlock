@@ -4,7 +4,7 @@ set -e
 #DEBHELPER#
 
 # Drop gpu_unlock from every initramfs now that the module and the
-# initramfs-tools drop-in are gone.
+# initramfs drop-ins are gone.
 if [ "$1" = remove ] && command -v update-initramfs >/dev/null; then
 	update-initramfs -u -k all
 fi
