@@ -30,8 +30,7 @@ to redo when NVIDIA releases a new driver.
 
 Laptops only stay unlocked if the dedicated GPU is never fully powered off.  
 Many laptops power it down when idle, which silently resets the unlock. Turning  
-off runtime power management with `options nvidia NVreg_DynamicPowerManagement=0x00`
-in `/etc/modprobe.d/` helps on some models, but expect mixed results.
+off runtime power management with `options nvidia NVreg_DynamicPowerManagement=0x00` and/or `options nvidia NVreg_RegistryDwords="PowerMizerEnable=0x1; PerfLevelSrc=0x2222; PowerMizerLevel=0x2; PowerMizerDefaultAC=0x2"` in `/etc/modprobe.d/` helps on some models, but expect mixed results.
 
 The exact PCI device IDs are in [`kernel/gpu_unlock/recipes.c`](kernel/gpu_unlock/recipes.c).
 Linux only. For Windows see the [FAQ](#faq).
@@ -49,6 +48,7 @@ Dense matrix multiply (FP32 accumulation, stock power limits):
 | Card | BF16 before | BF16 after | Gain |
 | --- | --- | --- | --- |
 | RTX 3060 12 GB | 27 TFLOPS | 51 TFLOPS | +87% |
+| RTX 3060 Mobile 6 GB | 27 TFLOPS | 45 TFLOPS | +64% |
 | RTX 3060 Ti | 37 TFLOPS | 68 TFLOPS | +82% |
 | RTX 3070 | 40 TFLOPS | 72 TFLOPS | +81% |
 | RTX 3080 10 GB | 65 TFLOPS | 113 TFLOPS | +73% |
