@@ -59,6 +59,11 @@ int gu_falcon_reset(const struct gu_falcon_io *io, const struct gu_falcon_engine
 		    struct gu_falcon_evidence *evidence);
 int gu_falcon_hs(const struct gu_falcon_io *io, const struct gu_falcon_engine *eng,
 		 const struct gu_falcon_hs_image *image, struct gu_falcon_evidence *evidence);
+int gu_falcon_hs_probe(const struct gu_falcon_io *io, const struct gu_falcon_engine *eng,
+		       const struct gu_falcon_hs_image *image, struct gu_falcon_evidence *evidence);
+void gu_falcon_dma_capture_enable(u32 *buf, size_t size, const u32 *src);
+void gu_falcon_dma_capture_disable(void);
+size_t gu_falcon_dma_capture_size(void);
 int gu_falcon_direct(const struct gu_falcon_io *io, const struct gu_falcon_engine *eng,
 		     const struct gu_falcon_direct_image *image, struct gu_falcon_evidence *evidence);
 int gu_falcon_loader(const struct gu_falcon_io *io, const struct gu_falcon_engine *eng,
