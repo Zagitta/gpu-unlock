@@ -113,7 +113,10 @@ A: No this is the one and only OG source for gpu-unlock. Crypto, websites, insta
 - Q: Does this depend on a specific driver version? I see `610.43.03` is pinned.  
 A: No the driver is only fetched to extract firmware this unlock depends on    
 - Q: What about Windows?  
-A: I don't run windows and don't plan to maintain it but [https://github.com/impacifist/Windows-GPU-UNLOCK](https://github.com/impacifist/Windows-GPU-UNLOCK) has built a port, YMMV.   
+A: I don't run windows and don't plan to maintain it but two ports exist, YMMV:   
+[https://github.com/impacifist/Windows-GPU-UNLOCK](https://github.com/impacifist/Windows-GPU-UNLOCK) (Ampere, per-machine profiles), and   
+[https://github.com/physicsdolphin/nv-uefi-unlocker](https://github.com/physicsdolphin/nv-uefi-unlocker) (Turing / Ampere / Ada, bootable USB UEFI app).   
+The latter runs before the driver binds from a one-shot USB boot - no resident boot entry, no NVRAM changes, no installer; firmware is never bundled, it is regenerated locally from the pinned public inputs (same 610.43.03 pipeline), and Turing needs the GSP firmware mode switch. Real-machine verified matrix and logs: [docs/compatibility.md](https://github.com/physicsdolphin/nv-uefi-unlocker/blob/main/docs/compatibility.md).   
 There are windows installer's floating around but I would recommend being ++**very**++ careful with those.
 - Q: What about Blackwell (RTX 50)?  
 A: Not supported and unlikely to happen.    
