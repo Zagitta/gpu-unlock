@@ -316,7 +316,14 @@ int gu_falcon_loader(const struct gu_falcon_io *io, const struct gu_falcon_engin
 	if ((hwcfg & 0x1ff) < 2)
 		return -ERANGE;
 	dst = ((hwcfg & 0x1ff) - 2) << 8;
-	falcon_write(io, eng->base + GU_FALCON_DMACTL_OFFSET, trans & ~1u);
+	/* The loader DMAs FWSEC from physical sysmem with no instance block:
+	 * allow physical requests without a context and clear DMACTL, as
+	 * gu_falcon_hs() and kflcnDisableCtxReq_TU102 do. Without it a TU10x
+	 * loader never halts (-ETIMEDOUT). */
+	if (falcon_read(io, eng->fbif + GU_FBIF_CTL_OFFSET, &trans) || inaccessible(trans))
+		return -EIO;
+	falcon_write(io, eng->fbif + GU_FBIF_CTL_OFFSET, trans | (1u << 7));
+	falcon_write(io, eng->base + GU_FALCON_DMACTL_OFFSET, 0);
 	if (falcon_read(io, eng->fbif + GU_FBIF_TRANSCFG(4), &trans) || inaccessible(trans))
 		return -ENODEV;
 	falcon_write(io, eng->fbif + GU_FBIF_TRANSCFG(4), (trans & ~7u) | 5u);
@@ -383,7 +390,10 @@ int gu_falcon_direct(const struct gu_falcon_io *io, const struct gu_falcon_engin
 	if (ret)
 		return ret;
 	ret = gu_falcon_poll(io, eng->base + GU_FALCON_CPUCTL_OFFSET, 16, 0, 1000, true, NULL);
-	if (ret)
+	/* TU10x SEC2 reads back HALTED after reset, like its GSP in
+	 * gu_falcon_loader(): seen on a 2060 (0x840100 stays 0x10). The target
+	 * readback after the launch proves the Booter ran, not this bit. */
+	if (ret && ret != -ETIMEDOUT)
 		return ret;
 	/* REQUIRE_CTX=false, matching kflcnDisableCtxReq. */
 	if (falcon_read(io, eng->base + GU_FALCON_DMACTL_OFFSET, &ctl) || inaccessible(ctl))
