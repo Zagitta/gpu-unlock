@@ -1,4 +1,4 @@
-%global nv 610.43.03
+%global nvver 610.43.03
 
 Name: gpu-unlock
 Version: 2.0.0
@@ -7,8 +7,8 @@ Summary: RTX 3090 BF16 unlock before the NVIDIA driver loads
 License: GPL-2.0-only
 BuildArch: noarch
 Source0: gpu-unlock-%{version}.tar.xz
-Source1: https://download.nvidia.com/XFree86/NVIDIA-kernel-module-source/NVIDIA-kernel-module-source-%{nv}.tar.xz
-Source2: https://download.nvidia.com/XFree86/Linux-x86_64/%{nv}/NVIDIA-Linux-x86_64-%{nv}-no-compat32.run
+Source1: https://download.nvidia.com/XFree86/NVIDIA-kernel-module-source/NVIDIA-kernel-module-source-%{nvver}.tar.xz
+Source2: https://download.nvidia.com/XFree86/Linux-x86_64/%{nvver}/NVIDIA-Linux-x86_64-%{nvver}-no-compat32.run
 # NVIDIA inputs stay out of the source RPM (it becomes a .nosrc.rpm).
 NoSource: 1
 NoSource: 2
