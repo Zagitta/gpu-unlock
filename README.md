@@ -142,7 +142,45 @@ make install-rpm    # dnf builddep, rpmbuild, dnf install
 
 `make install` uses `/etc/os-release` (`ID`, then `ID_LIKE`) to detect Arch,
 Debian/Ubuntu, or Fedora/RHEL/CentOS families. The RPM installer requires DNF.
-For other distributions, select a compatible explicit target above.
+For other distributions, select a compatible explicit target above; where no
+native packager exists, `make install` falls back to the DKMS install below.
+
+### Direct install, no packager
+
+Stage the module source in `/usr/src`, let DKMS build and install it, then
+drop the generated firmware, the licenses and the initramfs hook in place.
+Needs `dkms`, kernel headers, `python3` and `zstd` — no `makepkg`, `dpkg`
+or `rpmbuild`.
+
+```sh
+make install-local        # assets + dkms install + firmware + hook + initramfs
+make uninstall-local      # the reverse
+```
+
+Pass `SUDO=` to run the privileged steps as an already-root user (a chroot,
+for example), `BOOT=dracut|mkinitcpio|initramfs-tools` to pick the hook
+instead of detecting one, and `TARGET=` to select the kernel:
+
+```sh
+make install-local TARGET=$(uname -r)   # the running kernel (default)
+make install-local TARGET=all           # every installed kernel DKMS can build for
+```
+
+The pieces are separate targets too, if you want to run them yourself:
+
+```sh
+make modules                            # build gpu_unlock.ko in the tree
+make clean-modules
+make dkms-install / dkms-uninstall     # the module, through DKMS
+make install-firmware install-licenses install-boot rebuild-initramfs
+make insmod ARGS=targets=all           # hand-load the built module
+make rmmod
+make status                            # dkms, lsmod, modinfo, firmware
+```
+
+`make modules` finds the kernel tree through `/lib/modules/$(uname -r)/build`,
+then `/usr/src/linux-headers-*`, `/usr/src/kernel-headers-*` and
+`/usr/src/kernels/*`, or take `KDIR=` directly.
 
 `make arch`, `make deb` and `make rpm` only build. Debian and RPM packages go
 to `build/deb` and `build/rpm`. The NVIDIA inputs are cached in
