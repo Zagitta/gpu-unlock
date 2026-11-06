@@ -432,6 +432,7 @@ static const struct gu_card cards[] = {
 	GA106(0x2501), GA106(0x2503), GA106(0x2504), GA106(0x2505),
 	GA106(0x2507), GA106(0x2508), GA106(0x2509), GA106(0x252f),
 	GA106(0x2544),
+    GA106(0x2520),  /* RTX 3060 Mobile / GA106M */
 };
 
 const struct gu_card *gu_card_find(u16 device)
