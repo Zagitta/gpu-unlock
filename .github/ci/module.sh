@@ -20,6 +20,9 @@ fedora)
 	dnf install -qy make gcc kernel-devel ;;
 arch)
 	pacman -Syu --noconfirm --needed make gcc linux-headers linux-lts-headers ;;
+void)
+	xbps-install -y -S ca-certificates git make gcc \
+		"kernel-headers-$(uname -r)" ;;
 *)
 	echo "unknown distribution: $ID" >&2
 	exit 1 ;;
