@@ -22,7 +22,7 @@ at the rootfs stage, which avoids touching the initrd at all.
 - The module never registers as a PCI driver (no MODULE_DEVICE_TABLE),
   so it can never race udev for the device.
 
-## Config diff (prod3: 2× RTX 3090, nonguix `linux` + `nvidia-service-type`)
+## Config additions (nonguix `linux` + `nvidia-service-type`)
 
 Imports:
 
@@ -43,34 +43,30 @@ operating-system additions:
                        "gpu_unlock.targets=all"
                        %default-kernel-arguments))
 
-    ;; services (before nvidia-pm-set):
-    (simple-service 'gpu-unlock-load shepherd-root-service-type
-      (list (shepherd-service
-              (provision '(gpu-unlock-load))
-              (requirement '(file-systems))
-              (one-shot? #t)
-              (start #~(lambda _
-                         (let ((modprobe (string-append #$kmod "/bin/modprobe")))
-                           (and (zero? (system* modprobe "gpu_unlock"))
-                                (zero? (system* modprobe "nvidia_drm"))
-                                (zero? (system* modprobe "nvidia_uvm"))
-                                (begin
-                                  (display "gpu-unlock: NVIDIA stack loaded\n"))
-                                #t))))
-              (stop #~(const #f)))))
+    ;; the boot-time one-shot is too long to inline here — see
+    ;; config-example.scm in this directory for the complete,
+    ;; boot-proven service (holder sweep, udev freeze, retry logic,
+    ;; modprobe -d).  Its four essential steps:
+    ;;   1. stop nvidia-powerd (shepherd-respawned daemons must be
+    ;;      stopped via herd, and powerd holds the driver open)
+    ;;   2. freeze the udev exec queue (nonguix's setuid nvidia-modprobe
+    ;;      udev rule would otherwise rebind mid-eject)
+    ;;   3. sweep /dev/nvidia* fd holders, eject the bound stack, load
+    ;;      gpu_unlock, resume udev, then modprobe the NVIDIA stack with
+    ;;      -d /run/booted-system/kernel
+    ;;   4. require 'gpu-unlock-load in any service that opens CUDA and
+    ;;      in the nvidia-pm-set service, or they hold the driver and
+    ;;      the unlock silently no-ops
 
-    ;; and make the power-cap service wait for it:
-    ;;   (requirement '(user-processes gpu-unlock-load))  ; was '(user-processes)
-
-## Build & deploy (prod3 recipe)
+## Build & deploy
 
     # validate without root (channels pinned to what built the current system):
     guix time-machine -C channels.scm -- \
-      system build -L /home/r/gpu-unlock/guix /home/r/gpu-unlock-port/config.scm
+      system build -L <repo>/guix path/to/your/config.scm
 
     # deploy (root, same pins):
     sudo guix time-machine -C channels.scm -- \
-      system reconfigure -L /home/r/gpu-unlock/guix /home/r/gpu-unlock-port/config.scm
+      system reconfigure -L <repo>/guix path/to/your/config.scm
 
 ## Verify after reboot
 
@@ -83,27 +79,26 @@ Rollback: remove `gpu_unlock.targets=all` and the nvidia blacklist
 entries from `kernel-arguments` (or boot an older generation from the
 GRUB menu — gpu_unlock without the cmdline flag is inert).
 
-## channels.scm (pins used to build the current prod3 system)
+## channels.scm (pin the pair that built your current system)
 
-    (list (channel
-            (name 'guix)
-            (url "https://git.guix.gnu.org/guix.git")
-            (branch "master")
-            (commit "df85457"))          ; per /etc/config.scm header
-          (channel
-            (name 'nonguix)
-            (url "https://gitlab.com/nonguix/nonguix")
-            (commit "c15e19cdbdfdfddacdae865741809af4fa86a665")
-            (introduction
-             (make-channel-introduction
-              "4848788178acf1026e116b32cef8ea763133cb8a"
-              (openpgp-fingerprint
-               "2A39 3FFF 68F4 EF7A 3D29  12AF 6F51 20A0 22FB B2D5")))))
+    Read /run/current-system/provenance to see the commit pair your
+    running system was built from, and pin both.  Pinned commits need
+    explicit introductions (see "channel authentication" in the Guix
+    manual) — a seeded or older cache otherwise fails with
+    "channel 'guix' lacks 'introduction' field but '.guix-authorizations'
+    found".  If a box's outbound git path is broken, pre-seed
+    ~/.cache/guix/checkouts/ from a box that resolved the identical
+    spec (slot names are not derivable from the URL — seed every
+    observed name).
 
 ## Bench (post-reboot)
 
-No torch on prod3; verification is kernel-log-based: the `gfw` stage
-writes the speed selectors, and `ss0` readbacks in the log match the
-unlocked profile.  For a TFLOPS number, run the 8192³ BF16 matmul
-bench from the gpu-unlock skill on any box with torch + a 3090
-(inf01/inf02 measured 117.3/115.2 TFLOPS vs the 75 stock cap).
+Verified on 3 Guix hosts / 2 kernel versions (7.1.8, 7.2.15), 2× RTX
+3090 each.  Boot-persistent unlock, full log sequence, zero errors:
+
+    GPU0 117.8 TFLOPS / GPU1 113.0 TFLOPS   (8192³ BF16, torch bench)
+    vs 70.1 TFLOPS stock                     (~1.7×)
+
+Quick check without torch: `dmesg | grep gpu_unlock` shows the
+stage=claim/gfw lines with ss0=0x88888888 per GPU before the driver
+binds, and /run/gpu-unlock-load.log carries the one-shot's sequence.
