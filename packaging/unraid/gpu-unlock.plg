@@ -46,7 +46,9 @@ upgradepkg --install-new "$dir/$pkg"
 depmod -a
 
 # TARGETS is "all" or comma-separated PCI addresses, as for gpu_unlock.targets=.
-[ -f &plugin;/&name;.cfg ] || echo 'TARGETS="all"' > &plugin;/&name;.cfg
+# Empty until the user opts in, same as the module itself: edit the .cfg file
+# below to set it.
+[ -f &plugin;/&name;.cfg ] || echo 'TARGETS=""' > &plugin;/&name;.cfg
 source &plugin;/&name;.cfg
 printf '%s\n' '# Written by the gpu-unlock plugin from &plugin;/&name;.cfg' \
   'softdep nvidia pre: gpu_unlock' "options gpu_unlock targets=$TARGETS" > /etc/modprobe.d/&name;.conf
