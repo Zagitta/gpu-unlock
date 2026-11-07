@@ -1,0 +1,29 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+# Generate the firmware gpu_unlock loads from the pinned NVIDIA @NV@
+# downloads, as the other packages do at build time, and keep it on the
+# flash drive. Unraid has no Python, so this runs in a throwaway container
+# and needs Docker to be running. Does nothing once the firmware is there.
+set -eu
+dir=/boot/config/plugins/gpu-unlock/firmware
+nv=@NV@
+[ ! -d "$dir/$nv" ] || exit 0
+if ! docker info >/dev/null 2>&1; then
+	echo "gpu-unlock: start Docker, then run gpu-unlock-firmware to generate the firmware" >&2
+	exit 1
+fi
+echo "gpu-unlock: downloading about 370 MB from NVIDIA to generate the firmware"
+rm -rf "$dir/$nv.new"
+mkdir -p "$dir/$nv.new"
+docker run --rm -e NV="$nv" -v /usr/local/share/gpu-unlock:/src:ro -v "$dir/$nv.new:/out" \
+	python:3.13-alpine sh -euc '
+apk add -q --no-cache tar xz zstd
+python3 /src/fetch_artifacts.py /tmp/inputs
+tar -xf "/tmp/inputs/NVIDIA-kernel-module-source-$NV.tar.xz" -C /tmp
+python3 /src/extract_gsp.py "/tmp/inputs/NVIDIA-Linux-x86_64-$NV-no-compat32.run" /out
+python3 /src/extract_boot_assets.py "/tmp/NVIDIA-kernel-module-source-$NV" /out'
+cp /usr/local/share/gpu-unlock/NOTICE.md "$dir/$nv.new/"
+mv "$dir/$nv.new" "$dir/$nv"
+# Firmware of earlier NVIDIA versions.
+find "$dir" -mindepth 1 -maxdepth 1 ! -name "$nv" -exec rm -rf {} +
+echo "gpu-unlock: firmware generated in $dir/$nv"

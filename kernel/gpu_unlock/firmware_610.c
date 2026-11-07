@@ -59,8 +59,10 @@ static int validate_booter(const struct firmware *fw, struct gpu_unlock_booter_h
 	    image_size != expect->image_size ||
 	    fw->size != 72u + image_size + sig_bytes)
 		return GU_DIAG(-EINVAL);
-	/* Keep the signed GA100 and AD102 production geometries distinct. */
-	if (hdr.ucode_id != 3 || hdr.engine_id != 1 || hdr.num_sigs != expect->num_sigs ||
+	/* Keep the signed GA100, GA10x, AD10x and TU10x production geometries
+	 * distinct. */
+	if (hdr.ucode_id != expect->ucode_id || hdr.engine_id != 1 ||
+	    hdr.num_sigs != expect->num_sigs ||
 	    sig_bytes != expect->sig_bytes || hdr.os_code_off != 0 ||
 	    hdr.os_code_size != 256 || hdr.os_data_off != expect->os_data_off ||
 	    hdr.os_data_size != expect->os_data_size || hdr.app_code_off != 256 ||
@@ -258,3 +260,7 @@ MODULE_FIRMWARE(GU_FW_DESC_GA100);
 MODULE_FIRMWARE(GU_FW_BOOTER_AD102);
 MODULE_FIRMWARE(GU_FW_BOOT_AD102);
 MODULE_FIRMWARE(GU_FW_DESC_AD102);
+MODULE_FIRMWARE(GU_FW_BOOTER_TU102);
+MODULE_FIRMWARE(GU_FW_BOOT_TU102);
+MODULE_FIRMWARE(GU_FW_DESC_TU102);
+MODULE_FIRMWARE(GU_FW_SEC2_BL_TU102);

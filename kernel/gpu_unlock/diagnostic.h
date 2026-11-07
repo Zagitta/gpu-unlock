@@ -8,8 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-/* Userspace builds are the integration harness; keep diagnostics opt-in so
- * the acceptance output is readable.  The kernel build is unchanged. */
+/* Userspace builds keep diagnostics opt-in via GPU_UNLOCK_DIAG. */
 static inline int gu_diag_enabled(void)
 {
     const char *on = getenv("GPU_UNLOCK_DIAG");

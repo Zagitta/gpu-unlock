@@ -25,6 +25,8 @@ typedef uint32_t u32;
 #define GU_PCI_COMMAND_IO 0x1u
 #define GU_PCI_COMMAND_MEMORY 0x2u
 #define GU_PCI_COMMAND_MASTER 0x4u
+#define GU_PCI_PM_CTRL_STATE_MASK 0x3u
+#define GU_PCI_PM_STATE_D0 0x0u
 
 struct gpu_unlock_gfw_sample {
 	bool config_ok;
@@ -38,5 +40,8 @@ int gpu_unlock_gfw_assess(const struct gpu_unlock_gfw_sample *sample);
 
 /* Put memory and bus-master bits back. Leave every other command bit alone. */
 u16 gpu_unlock_command_restore(u16 original, u16 live);
+
+/* PMCSR reports D0. PCI_D0 is the kernel's pci_power_t, not a PMCSR field. */
+bool gpu_unlock_pmcsr_d0(u16 pmcsr);
 
 #endif

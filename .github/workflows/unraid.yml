@@ -1,0 +1,99 @@
+# SPDX-License-Identifier: GPL-2.0-only
+name: Unraid
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Runs one at a time: publish rewrites built.txt in the release.
+concurrency:
+  group: unraid
+
+# Builds the package of this VERSION for every stable Unraid release that
+# has none yet, and publishes the packages and the plugin to the unraid
+# release, which the plugin downloads from.
+jobs:
+  discover:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    outputs:
+      releases: ${{ steps.find.outputs.releases }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "releases=$(sh packaging/unraid/discover.sh)" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: build (Unraid ${{ matrix.unraid.version }})
+    needs: discover
+    if: needs.discover.outputs.releases != '[]'
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        unraid: ${{ fromJSON(needs.discover.outputs.releases) }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Unraid kernel source
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -qy squashfs-tools
+          curl -sSfL -o unraid.zip '${{ matrix.unraid.url }}'
+          echo '${{ matrix.unraid.sha256 }}  unraid.zip' | sha256sum -c -
+          unzip -q unraid.zip bzmodules
+          unsquashfs -q -d usr bzmodules src
+          rm unraid.zip bzmodules
+      # In a container of the gcc major version the kernel was built with.
+      - name: Build
+        run: |
+          src=$(echo usr/src/linux-*-Unraid)
+          gcc=$(sed -n 's/^CONFIG_CC_VERSION_TEXT="gcc (GCC) \([0-9]*\)\..*/\1/p' "$src/config")
+          docker run --rm -v "$PWD:/repo" -w /repo "gcc:$gcc" sh -euc '
+            apt-get update -q
+            apt-get install -qy --no-install-recommends bc bison flex libelf-dev libssl-dev kmod xz-utils patch
+            sh packaging/unraid/build.sh "$1" dist
+            chown -R "$2" dist' sh "$src" "$(id -u):$(id -g)"
+          echo "${{ matrix.unraid.version }} $(cat VERSION)" > 'dist/${{ matrix.unraid.version }}.built'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: unraid-${{ matrix.unraid.version }}
+          path: dist
+
+  # Also when some builds failed, so the others are published.
+  publish:
+    needs: [discover, build]
+    if: ${{ !cancelled() && needs.discover.result == 'success' }}
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+      - if: needs.discover.outputs.releases != '[]'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: unraid-*
+          merge-multiple: true
+          path: dist
+      - name: Publish
+        run: |
+          gh release view unraid >/dev/null 2>&1 ||
+            gh release create unraid --prerelease --target main --title 'Unraid packages' \
+              --notes 'Packages for the Unraid plugin, see packaging/unraid. Install it from the gpu-unlock.plg URL below.'
+          mkdir -p dist
+          set -- dist/*.txz
+          if [ -e "$1" ]; then
+            gh release upload unraid --clobber dist/*.txz dist/*.md5
+          fi
+          gh release download unraid -p built.txt -O built.txt 2>/dev/null || : > built.txt
+          { cat built.txt; cat dist/*.built 2>/dev/null || :; } | sort -u -o built.txt
+          sed "s/@VERSION@/$(cat VERSION)/" packaging/unraid/gpu-unlock.plg > gpu-unlock.plg
+          # The plugin last, once the packages it downloads are there.
+          gh release upload unraid --clobber built.txt gpu-unlock.plg

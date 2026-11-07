@@ -15,8 +15,11 @@
 #define GU_FW_BOOTER_AD102 "gpu-unlock/610.43.03/booter_load_ad102.bin"
 #define GU_FW_BOOT_AD102   "gpu-unlock/610.43.03/gsp_boot_ad102.bin"
 #define GU_FW_DESC_AD102   "gpu-unlock/610.43.03/gsp_boot_desc_ad102.bin"
+#define GU_FW_BOOTER_TU102 "gpu-unlock/610.43.03/booter_load_tu102.bin"
+#define GU_FW_BOOT_TU102   "gpu-unlock/610.43.03/gsp_boot_tu102.bin"
+#define GU_FW_DESC_TU102   "gpu-unlock/610.43.03/gsp_boot_desc_tu102.bin"
+#define GU_FW_SEC2_BL_TU102 "gpu-unlock/610.43.03/sec2_bl_tu102.bin"
 
-struct gu_reg_write { u32 addr, value; };
 struct gu_write_table { const struct gu_reg_write *entries; size_t count; };
 
 /* Header fields that differ between signed Booter images. The common checks
@@ -24,6 +27,7 @@ struct gu_write_table { const struct gu_reg_write *entries; size_t count; };
 struct gu_booter_expect {
 	u32 image_size, num_sigs, sig_bytes;
 	u32 os_data_off, os_data_size, app_code_size, patch_loc;
+	u32 ucode_id;
 };
 
 enum gu_sec2_launch {
@@ -56,6 +60,8 @@ struct gu_family {
 	const struct gu_booter *booter;
 	const char *loader; /* NULL when this family has no generic loader */
 	u8 fwsec_version;
+	u32 feat_plm, feat_ss0, feat_ss1;
+	bool turing_layout; /* VBIOS FB-range register and no MMU lock */
 };
 struct gu_card {
 	u16 device;

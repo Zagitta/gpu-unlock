@@ -14,8 +14,7 @@
 #endif
 #include "vbios_610.h"
 
-/* Production selects 0x85. The integration build selects the debug app
- * 0x45; this is a compile-time seam, never a runtime knob. */
+/* FWSEC application selected for the VBIOS request. */
 #ifndef GPU_UNLOCK_FWSEC_APP
 #define GPU_UNLOCK_FWSEC_APP 0x85
 #endif
@@ -128,45 +127,49 @@ static int descriptor(const u8 *rom, size_t length, u64 off,
 	GU_NOTE("FWSEC descriptor: offset=%#llx ROM_bytes=%zu header=%#x\n",
 		(unsigned long long)off, length, hdr);
 	fw.version = (hdr >> 8) & 0xff;
-	/* GA100 uses the v2 generic-loader descriptor, with embedded signatures.
-	 * Its image is kept contiguous here; the loader receives separate code
-	 * and data DMA bases within that allocation. */
+	/* v2 generic-loader descriptor. TU102 and GA100 share this layout, but
+	 * TU102 uses a non-zero secure IMEM base inside the same image. */
 	if ((hdr & 1) && fw.version == 2) {
-		u32 sec_base, sec_size;
+		u32 sec_base, sec_size, code_size_aligned, data_size_aligned;
+
 		if (size < 60 || range(length, off, size))
 			return GU_DIAG(-EINVAL);
+		/* The generic loader starts at zero and loads DMEM at zero. */
+		if (r32(rom + off + 12) || r32(rom + off + 44))
+			return GU_DIAG(-EINVAL);
+		stored = r32(rom + off + 4);
+		if (!stored || stored > ~(u32)0 - 255)
+			return GU_DIAG(-EINVAL);
+		fw.image_size = (stored + 255) & ~255u;
+		if (range(length, off + size, fw.image_size))
+			return GU_DIAG(-EINVAL);
 		fw.image_off = off + size;
-		fw.image_size = r32(rom + off + 4);
 		fw.interface_off = r32(rom + off + 16);
 		fw.imem_pa = r32(rom + off + 20);
 		fw.imem_size = r32(rom + off + 24);
 		fw.imem_va = r32(rom + off + 28);
 		sec_base = r32(rom + off + 32);
 		sec_size = r32(rom + off + 36);
+		if (sec_size > fw.imem_size || sec_size > ~(u32)0 - 255 ||
+		    sec_base < fw.imem_va ||
+		    sec_base - fw.imem_va > ~(u32)0 - fw.imem_pa)
+			return GU_DIAG(-EINVAL);
+		fw.imem_sec_size = (sec_size + 255) & ~255u;
+		fw.imem_ns_size = fw.imem_size - sec_size;
+		fw.imem_sec_pa = sec_base - fw.imem_va + fw.imem_pa;
 		fw.data_off = r32(rom + off + 40);
 		fw.dmem_pa = r32(rom + off + 44);
 		fw.dmem_size = r32(rom + off + 48);
-		/* Restrict to the layout this contiguous adapter implements; refuse
-		 * alternate images, relocation, compression and nonzero entry. */
-		if (!fw.image_size || !fw.imem_size || !fw.dmem_size ||
-		    r32(rom + off + 8) != fw.image_size || r32(rom + off + 12) ||
-		    r32(rom + off + 52) || r32(rom + off + 56) ||
-		    fw.imem_pa || fw.dmem_pa || sec_size > fw.imem_size ||
-		    sec_base < fw.imem_va || sec_size > ~(u32)0 - 255 ||
-		    (fw.data_off & 255) || (fw.imem_size & 255) ||
-		    (fw.dmem_size & 255) || (fw.image_size & 255) ||
-		    range(length, fw.image_off, fw.image_size) ||
+		code_size_aligned = (fw.imem_size + 255) & ~255u;
+		data_size_aligned = (fw.dmem_size + 255) & ~255u;
+		if (!fw.imem_size || !fw.dmem_size ||
 		    range(fw.image_size, 0, fw.imem_size) ||
-		    fw.data_off < fw.imem_size ||
+		    range(fw.image_size, fw.imem_sec_pa, fw.imem_sec_size) ||
 		    range(fw.image_size, fw.data_off, fw.dmem_size) ||
-	    range(fw.image_size, fw.data_off, ((u64)fw.dmem_size + 255) & ~255ull) ||
+		    range(code_size_aligned, fw.imem_pa, fw.imem_size) ||
+		    range(code_size_aligned, fw.imem_sec_pa, fw.imem_sec_size) ||
+		    range(data_size_aligned, fw.dmem_pa, fw.dmem_size) ||
 		    range(fw.dmem_size, fw.interface_off, 4))
-			return GU_DIAG(-EINVAL);
-		fw.imem_ns_size = fw.imem_size - sec_size;
-		fw.imem_sec_pa = sec_base - fw.imem_va;
-		fw.imem_sec_size = (sec_size + 255) & ~255u;
-		if ((fw.imem_ns_size & 255) || (fw.imem_sec_pa & 255) ||
-		    range(fw.imem_size, fw.imem_sec_pa, fw.imem_sec_size))
 			return GU_DIAG(-EINVAL);
 		*out = fw;
 		return 0;
@@ -376,6 +379,8 @@ int gpu_unlock_fwsec_patch_frts(u8 *image, const struct gpu_unlock_fwsec *fw, u6
 		return GU_DIAG(-EOPNOTSUPP);
 	cmd_off = r32(mapper + 8);
 	cmd_size = r32(mapper + 12);
+	GU_NOTE("FWSEC mapper offset=%#zx init_before=%#x cmd_off=%#x cmd_size=%#x\n",
+		(size_t)(mapper - dmem), r32(mapper + 44), cmd_off, cmd_size);
 	if (cmd_size < sizeof(cmd) || range(fw->dmem_size, cmd_off, cmd_size))
 		return GU_DIAG(-EINVAL);
 	w32(cmd, 1);
@@ -388,5 +393,7 @@ int gpu_unlock_fwsec_patch_frts(u8 *image, const struct gpu_unlock_fwsec *fw, u6
 	w32(cmd + 40, 2);
 	memcpy(dmem + cmd_off, cmd, sizeof(cmd));
 	w32(mapper + 44, 0x15);
+	GU_NOTE("FWSEC mapper patched init=%#x cmd0=%#x cmd4=%#x\n",
+		r32(mapper + 44), r32(dmem + cmd_off), r32(dmem + cmd_off + 4));
 	return 0;
 }

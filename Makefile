@@ -15,6 +15,7 @@ PKG        ?= gpu-unlock
 MODULE_FILES   := $(filter-out %.mod.c,$(sort $(wildcard kernel/gpu_unlock/*.[ch]))) \
                   kernel/gpu_unlock/Kbuild kernel/gpu_unlock/Makefile kernel/gpu_unlock/dkms.conf
 FIRMWARE_FILES := booter_load_ad102.bin booter_load_ga102.bin gsp_boot_ad102.bin gsp_boot_desc_ad102.bin \
+                  booter_load_tu102.bin gsp_boot_tu102.bin gsp_boot_desc_tu102.bin sec2_bl_tu102.bin \
                   booter_load_ga100.bin falcon_loader.bin gsp_ga10x.bin gsp_tu10x.bin \
                   gsp_boot_ga102.bin gsp_boot_desc_ga102.bin \
                   gsp_boot_ga100.bin gsp_boot_desc_ga100.bin

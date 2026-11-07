@@ -164,6 +164,22 @@ int gpu_unlock_boot_desc_parse(const u8 *data, size_t size, u32 image_size,
 	static const unsigned int ranges[] = { 1, 3, 8, 10, 12 };
 	unsigned int i;
 
+	/* GA100's unchanged v4 monitor descriptor has no manifest or image-size
+	 * fields. Keep this exact pinned geometry distinct from the v5 parser. */
+	if (data && out && size == 76 && image_size == 4096 && rd32(data) == 4) {
+		unsigned int j;
+		if (rd32(data + 4) || rd32(data + 8) != 1160 ||
+		    rd32(data + 12) != 1160 || rd32(data + 16) != 16)
+			return GU_DIAG(-EINVAL);
+		for (j = 5; j < 19; j++)
+			if (rd32(data + j * 4))
+				return GU_DIAG(-EINVAL);
+		*out = (struct gpu_unlock_boot_desc) {
+			.code_offset = 0, .data_offset = 1160,
+			.manifest_offset = 0, .image_size = image_size,
+		};
+		return 0;
+	}
 	if (!data || !out || size != 84 || !image_size ||
 	    rd32(data) != 5 || rd32(data + 56) != 1 ||
 	    rd32(data + 76) != image_size || rd32(data + 80))

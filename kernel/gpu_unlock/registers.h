@@ -86,6 +86,13 @@
 #define GU_SPEED_READOUT_MASK         0x07ffffffu
 #define GU_FEAT_SS0_OFFSET            0x0082381cu
 #define GU_FEAT_SS1_OFFSET            0x00823820u
+
+/* Turing keeps the same FEAT fields at the TU102 register aperture. */
+#define GU_TU102_FEAT_PLM_OFFSET      0x00409650u
+#define GU_TU102_FEAT_READOUT_OFFSET  0x00409668u
+#define GU_TU102_FEAT_SS0_OFFSET      0x00409664u
+#define GU_TU102_FEAT_SS1_OFFSET      0x0040966cu
+#define GU_TU102_FB_RANGE_OFFSET      0x00100ce0u
 /* SS0 has eight 4-bit fields; SS1 has one. Value 8 selects full rate. */
 #define GU_SS0_UNLOCK                 0x88888888u
 #define GU_SS1_UNLOCK                 0x8u
