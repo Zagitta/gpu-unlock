@@ -8,9 +8,6 @@ on:
     - cron: '17 5 * * *'
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 # Runs one at a time: publish rewrites built.txt in the release.
 concurrency:
   group: unraid
@@ -22,10 +19,14 @@ jobs:
   discover:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     outputs:
       releases: ${{ steps.find.outputs.releases }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - id: find
         env:
           GH_TOKEN: ${{ github.token }}
@@ -36,18 +37,25 @@ jobs:
     needs: discover
     if: needs.discover.outputs.releases != '[]'
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
         unraid: ${{ fromJSON(needs.discover.outputs.releases) }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - name: Unraid kernel source
+        env:
+          UNRAID_URL: ${{ matrix.unraid.url }}
+          UNRAID_SHA256: ${{ matrix.unraid.sha256 }}
         run: |
           sudo apt-get update -q
           sudo apt-get install -qy squashfs-tools
-          curl -sSfL -o unraid.zip '${{ matrix.unraid.url }}'
-          echo '${{ matrix.unraid.sha256 }}  unraid.zip' | sha256sum -c -
+          curl -sSfL -o unraid.zip "$UNRAID_URL"
+          echo "$UNRAID_SHA256  unraid.zip" | sha256sum -c -
           unzip -q unraid.zip bzmodules
           unsquashfs -q -d usr bzmodules src
           rm unraid.zip bzmodules
@@ -72,10 +80,14 @@ jobs:
     needs: [discover, build]
     if: ${{ !cancelled() && needs.discover.result == 'success' }}
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - if: needs.discover.outputs.releases != '[]'
         uses: actions/download-artifact@v4
         with:
