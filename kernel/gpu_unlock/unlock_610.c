@@ -1168,6 +1168,10 @@ static int restore_stock_signature(struct unlock_transaction_work *work)
 static int restore_frts(struct unlock_transaction_work *work)
 {
 	u32 lo = 0, hi = 0;
+	/* Turing never opens WPR_CFG_PLM to the host: these writes would be
+	 * dropped (-EIO). The two-write chain clears WPR2_ADDR_HI itself. */
+	if (work->card->family->turing_layout)
+		return 0;
 	if (!work->frts_saved)
 		return GU_RESULT(-EPROTO);
 	read_bar(work, GU_WPR2_ADDR_LO_OFFSET, &lo);
@@ -1258,8 +1262,11 @@ static int run_privileged_writes(struct unlock_transaction_work *work,
 			}
 			/* CPUCTL is diagnostic only: after FWSEC, GA102 SEC2 CPUCTL reads
 			 * 0xbadf5620 until the launch resets the engine. */
+			/* On Turing a PLM can read 0xbadf.... until the Booter
+			 * has run: only the readback after the launch counts. */
 			if (read_bar(work, entry->addr, &before) ||
-			    (before & 0xffff0000u) == 0xbadf0000u ||
+			    (!work->card->family->turing_layout &&
+			     (before & 0xffff0000u) == 0xbadf0000u) ||
 			    read_bar(work, GU_SEC2_BASE + GU_FALCON_CPUCTL_OFFSET, &ctl) ||
 			    read_bar(work, GU_SEC2_BASE + GU_FALCON_ENGINE_OFFSET, &engine) || inaccessible(engine))
 				return table_failure(work, "prelaunch", entry, after, -ENODEV);
@@ -1483,6 +1490,27 @@ static int unlock_transaction_reset(struct unlock_transaction_work *work)
 		return GU_RESULT(-EIO);
 	if (read_bar(work, GU_PMC_BOOT_0_OFFSET, &chip) || !chip || inaccessible(chip))
 		return GU_RESULT(-ENODEV);
+	/* Turing: the two-write chain leaves through the Booter's normal finalize
+	 * path with SEC2 halted and WPR2 cleared, so the selectors are kept by
+	 * skipping the FLR, which would lose them (as turing-unlock does). The
+	 * stock driver still requires WPR2_ADDR_HI.VAL == 0. */
+	if (work->card->family->turing_layout) {
+		u32 readout = 0;
+
+		if (read_bar(work, GU_WPR2_ADDR_LO_OFFSET, &lo) || inaccessible(lo) ||
+		    read_bar(work, GU_WPR2_ADDR_HI_OFFSET, &hi) || inaccessible(hi))
+			return GU_RESULT(-ENODEV);
+		if (hi >> 4) {
+			dev_err(&work->pdev->dev, "Turing WPR2 still enabled: lo=%#x hi=%#x; stock driver requires HI.VAL=0\n", lo, hi);
+			return GU_RESULT(-EBUSY);
+		}
+		read_bar(work, GU_TU102_FEAT_READOUT_OFFSET, &readout);
+		work->state = GU_QUIESCED;
+		dev_info(&work->pdev->dev,
+			 "gpu_unlock: stage=flr_skipped (Turing clean handoff) ss0=%#x ss1=%#x readout=%#x\n",
+			 ss0, ss1, readout);
+		return 0;
+	}
 	/* Ampere PF-FLR requires no engine-reset preconditioning in this cold,
 	 * unbound path (no initialized NVLink/P2P). The pinned GA102 rejoin14
 	 * sequence also goes from the early PLM result to FLR. A pre-FLR engine

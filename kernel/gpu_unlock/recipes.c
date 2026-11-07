@@ -122,48 +122,56 @@ static const struct gu_payload ad102_v67 = {
 	.marker = 0x67b00001,
 };
 
-/* TU102 port of the same six-write chain from Petri Krohn. The two signed Booters 
- * are that same code with functions moved, and the fwmap resolves the gadgets exactly
- * (score 1.0): the write entry 0x1110 -> 0x10b9, the status read
- * 0x576b -> 0x6521, the cleanup gadget 0x84c8 -> 0x7f27 and the final pass
- * 0xd52 -> 0xccb. The 0x18-byte frames and the 0x6140 canary are identical,
- * so the six frames sit at the same relative offsets from 0xf940.
- *
- * The frame 6 handoff stays at 0x7ea4, the Turing normal main handoff, rather
- * than the fwmap twin of GA102's 0x81ee (0x7cfc): the latter halts inside the
- * exit path and leaves the Booter's boot-stage marker (0x31) in MAILBOX0,
- * while 0x7ea4 runs the subsystem completion that publishes the clean zero. */
+/* TU10x two-write chain, from nlzy/turing-unlock (generate_v67.py, payload
+ * SHA-256 b0ec9029...). The GA102 six-write port above spun at 0x7bbc with
+ * MAILBOX0=0x47 on Turing: this Booter's cleanup must release ACR mutex 3,
+ * which the 0x6521/0x7f27/0xccb exit never does. Here the two writes go
+ * through 0x10b9 as before, then 0xcbd, 0x8e18, 0xc95, 0x1f89 (twice, with a
+ * real token read at main_sp + 0xf) and 0xe85 release the mutex and 0x7ea4
+ * returns through the Booter's normal finalize path, publishing MAILBOX0=0.
+ * Offsets are DMEM - 0x600, as in the other payloads; 0x6140 is the canary.
+ * Confirmed on TU102 (2080 Ti), TU104 (2080, 2070 SUPER) and TU106 (2060
+ * 6 GB, 2060 12 GB), Zagitta/gpu-unlock#242. */
 static const struct gu_payload_slot tu102_slots[] = {
-	{ 0xf940, 0xf944 },
-	{ 0xf958, 0xf95c },
-	{ 0xf970, 0xf974 },
-	{ 0xf988, 0xf98c },
-	{ 0xf9a0, 0xf9a4 },
-	{ 0xf9b8, 0xf9bc },
+	{ 0xf940, 0xf944 },	/* write 1 */
+	{ 0xf958, 0xf95c },	/* write 2 */
 };
 static const struct gu_payload_word tu102_words[] = {
 	{ 0x1100, 0x00000007 },
-	{ 0xf938, 0x00006140 },	/* 0x10b9 pop: r3 canary pointer, write 1 */
+	{ 0xf938, 0x00006140 },	/* r3 canary pointer, write 1 */
 	{ 0xf94c, 0x000010b9 },	/* write 1: r0=address, r1=value */
 	{ 0xf950, 0x00006140 },	/* frame 1: r3 for write 2 */
 	{ 0xf964, 0x000010b9 },	/* frame 1: ret -> write 2 */
-	{ 0xf968, 0x00006140 },	/* frame 2: r3 for write 3 */
-	{ 0xf97c, 0x000010b9 },	/* frame 2: ret -> write 3 */
-	{ 0xf980, 0x00006140 },	/* frame 3: r3 for write 4 */
-	{ 0xf994, 0x000010b9 },	/* frame 3: ret -> write 4 */
-	{ 0xf998, 0x00006140 },	/* frame 4: r3 for write 5 */
-	{ 0xf9ac, 0x000010b9 },	/* frame 4: ret -> write 5 */
-	{ 0xf9b0, 0x00006140 },	/* frame 5: r3 for write 6 */
-	{ 0xf9c4, 0x000010b9 },	/* frame 5: ret -> write 6 */
-	{ 0xf9c8, 0x00006140 },	/* frame 6: r3 (unused by cleanup) */
-	{ 0xf9d4, 0x00000003 },	/* frame 6: r0 = 3 for 0xccb */
-	{ 0xf9dc, 0x00006521 },	/* frame 6: ret -> SE/CSB handshake */
-	{ 0xf9e0, 0x00007f27 },	/* cleanup gadget */
-	{ 0xf9ec, 0x00000ccb },	/* cleanup: final pass */
-	{ 0xf9f0, 0x00007ea4 },	/* HS clean exit */
+	{ 0xf968, 0x00006140 },	/* frame 2: r3 */
+	{ 0xf974, 0x00000000 },
+	{ 0xf97c, 0x00000cbd },	/* frame 2: ret -> mutex release chain */
+	{ 0xf980, 0x00000001 },
+	{ 0xf984, 0x00000000 },
+	{ 0xf988, 0x00008e18 },
+	{ 0xf98c, 0x00000000 },
+	{ 0xf994, 0x00000c95 },
+	{ 0xf998, 0x00006140 },
+	{ 0xf99c, 0x00000000 },
+	{ 0xf9a0, 0x00000000 },
+	{ 0xf9a4, 0x00000001 },
+	{ 0xf9ac, 0x00001f89 },
+	{ 0xf9b0, 0x00006140 },
+	{ 0xf9b4, 0x00006140 },
+	{ 0xf9b8, 0x0000ffff },	/* token: main_sp 0xfff0 + 0xf */
+	{ 0xf9c0, 0x00001f89 },
+	{ 0xf9c4, 0x00006140 },
+	{ 0xf9c8, 0x00006140 },
+	{ 0xf9cc, 0x00000000 },
+	{ 0xf9d4, 0x00000e85 },	/* ACR mutex 3 release */
+	{ 0xf9d8, 0x00001f89 },
+	{ 0xf9dc, 0x00006140 },
+	{ 0xf9e0, 0x00006140 },
+	{ 0xf9e4, 0x00000000 },
+	{ 0xf9ec, 0x00007ea4 },	/* normal main handoff */
+	{ 0xf9f8, 0x00000000 },	/* main_sp + 0x08 */
 };
 static const struct gu_payload tu102_v67 = {
-	.name = "tu102-v67",
+	.name = "tu102-v67-2w",
 	.size = 0xfa00,
 	.fill = 0x000004a7,
 	.slots = tu102_slots,
@@ -173,13 +181,13 @@ static const struct gu_payload tu102_v67 = {
 	.completion = GU_PAYLOAD_HALT_RESET_PLM_ZERO,
 };
 
-/* Turing's FEAT aperture is at 0x409650. Opening WPR_CFG_PLM first lets the
- * driver's own WPR2 restore through the PLM gate; the second write opens the
- * FEAT aperture the SS0/SS1 selectors live behind. No WPR2 poke is needed:
- * restore_frts() writes it with the gate open. */
+/* Turing's FEAT aperture is at 0x409650: opening it lets the host write the
+ * SS0/SS1 selectors. WPR_CFG_PLM is never opened to the host on Turing, so
+ * the host cannot clear WPR2 itself (restore_frts() is skipped): the chain's
+ * second write clears WPR2_ADDR_HI, which the stock driver requires at 0. */
 static const struct gu_reg_write tu102_plm[] = {
-	{ GU_WPR_CFG_PLM_OFFSET,    0xfffff0ff },
 	{ GU_TU102_FEAT_PLM_OFFSET, 0xffffffff },
+	{ GU_WPR2_ADDR_HI_OFFSET,   0x00000000 },
 };
 static const struct gu_reg_write tu102_selectors[] = {
 	{ GU_TU102_FEAT_SS0_OFFSET, GU_SS0_UNLOCK },
