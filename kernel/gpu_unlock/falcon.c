@@ -307,10 +307,13 @@ int gu_falcon_loader(const struct gu_falcon_io *io, const struct gu_falcon_engin
 	ret = gu_falcon_reset(io, eng, evidence);
 	if (ret)
 		return ret;
-	/* Without this wait some TU10x boots fail right after the reset (#242:
-	 * -110 at 0x110100, or -5 with no WPR2), and dyndbg's slower path hid
-	 * it. The scrub wait in reset is not enough; 10 ms is empirical. */
-	msleep(10);
+	/* TU10x reports the IMEM/DMEM scrub in DMACTL bits 1-2, not HWCFG2
+	 * bit 12, so the reset returns ~20 us early and the loader written
+	 * mid-scrub never halts (#242: -110 at 0x110100). Same wait as
+	 * kflcnWaitForResetToFinish_TU102(). */
+	ret = gu_falcon_poll(io, eng->base + GU_FALCON_DMACTL_OFFSET, 0x6, 0, 100000, true, NULL);
+	if (ret)
+		return ret;
 	/* TU10x GSP reads back HALTED after reset, as the HS path tolerates.
 	 * The WPR2 check after FWSEC proves the launch, not this bit. */
 	if (falcon_read(io, eng->base + GU_FALCON_CPUCTL_OFFSET, &ctl) || inaccessible(ctl) ||
