@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 from pathlib import Path
 import tempfile
@@ -14,20 +15,43 @@ INPUTS = (
         "filename": "NVIDIA-kernel-module-source-610.43.03.tar.xz",
         "url": "https://download.nvidia.com/XFree86/NVIDIA-kernel-module-source/"
                "NVIDIA-kernel-module-source-610.43.03.tar.xz",
+        # Must match packaging/arch/PKGBUILD and packaging/rpm/gpu-unlock.spec.
+        "sha256": "7e118923c7a23edc36114d63273a46e3e04e9af98695a42203e7ac2dfe9fc1dc",
     },
     {
         "filename": "NVIDIA-Linux-x86_64-610.43.03-no-compat32.run",
         "url": "https://download.nvidia.com/XFree86/Linux-x86_64/610.43.03/"
                "NVIDIA-Linux-x86_64-610.43.03-no-compat32.run",
+        "sha256": "e084451db730a6df29d3d74f655749c4d236e3c945f7d94b5205e84318fe2f90",
     },
 )
+
+
+def sha256_of(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        while block := stream.read(1024 * 1024):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def verify(path: Path, expected_sha256: str) -> None:
+    actual = sha256_of(path)
+    if actual != expected_sha256:
+        raise ValueError(f"{path}: sha256 {actual} does not match pinned {expected_sha256}")
 
 
 def fetch(entry: dict, output: Path, offline: bool = False) -> Path:
     output.mkdir(parents=True, exist_ok=True)
     destination = output / entry["filename"]
     if destination.exists():
-        return destination
+        try:
+            verify(destination, entry["sha256"])
+            return destination
+        except ValueError:
+            if offline:
+                raise
+            destination.unlink()
     if offline:
         raise FileNotFoundError(f"missing cached artifact: {destination}")
     temporary = None
@@ -46,6 +70,7 @@ def fetch(entry: dict, output: Path, offline: bool = False) -> Path:
                     stream.write(block)
                 stream.flush()
                 os.fsync(stream.fileno())
+        verify(temporary, entry["sha256"])
         temporary.chmod(0o644)
         temporary.replace(destination)
         return destination
