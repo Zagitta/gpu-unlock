@@ -8,8 +8,9 @@ on:
     - cron: '17 5 * * *'
   workflow_dispatch:
 
+# Write access only where it is used: publish uploads to the unraid release.
 permissions:
-  contents: write
+  contents: read
 
 # Runs one at a time: publish rewrites built.txt in the release.
 concurrency:
@@ -26,6 +27,8 @@ jobs:
       releases: ${{ steps.find.outputs.releases }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - id: find
         env:
           GH_TOKEN: ${{ github.token }}
@@ -40,14 +43,23 @@ jobs:
       fail-fast: false
       matrix:
         unraid: ${{ fromJSON(needs.discover.outputs.releases) }}
+    # The matrix comes from releases.unraid.net, so its values reach the shell
+    # as environment variables, never pasted into the scripts.
+    env:
+      UNRAID_VERSION: ${{ matrix.unraid.version }}
+      UNRAID_URL: ${{ matrix.unraid.url }}
+      UNRAID_SHA256: ${{ matrix.unraid.sha256 }}
     steps:
+      # The build container mounts the checkout, so leave no token in it.
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - name: Unraid kernel source
         run: |
           sudo apt-get update -q
           sudo apt-get install -qy squashfs-tools
-          curl -sSfL -o unraid.zip '${{ matrix.unraid.url }}'
-          echo '${{ matrix.unraid.sha256 }}  unraid.zip' | sha256sum -c -
+          curl -sSfL -o unraid.zip "$UNRAID_URL"
+          echo "$UNRAID_SHA256  unraid.zip" | sha256sum -c -
           unzip -q unraid.zip bzmodules
           unsquashfs -q -d usr bzmodules src
           rm unraid.zip bzmodules
@@ -61,7 +73,7 @@ jobs:
             apt-get install -qy --no-install-recommends bc bison flex libelf-dev libssl-dev kmod xz-utils patch
             sh packaging/unraid/build.sh "$1" dist
             chown -R "$2" dist' sh "$src" "$(id -u):$(id -g)"
-          echo "${{ matrix.unraid.version }} $(cat VERSION)" > 'dist/${{ matrix.unraid.version }}.built'
+          echo "$UNRAID_VERSION $(cat VERSION)" > "dist/$UNRAID_VERSION.built"
       - uses: actions/upload-artifact@v4
         with:
           name: unraid-${{ matrix.unraid.version }}
@@ -72,10 +84,15 @@ jobs:
     needs: [discover, build]
     if: ${{ !cancelled() && needs.discover.result == 'success' }}
     runs-on: ubuntu-24.04
+    # Creates the unraid release and uploads the packages and plugin to it.
+    permissions:
+      contents: write
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - if: needs.discover.outputs.releases != '[]'
         uses: actions/download-artifact@v4
         with:
