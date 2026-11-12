@@ -28,6 +28,8 @@ debian|ubuntu)
 	apt-get install -qy --no-install-recommends ca-certificates git make xz-utils zstd ;;
 fedora)
 	dnf install -qy git make xz zstd rpm-build dnf-plugins-core ;;
+almalinux|rocky|rhel|centos)
+	dnf install -qy git make xz zstd rpm-build ;;
 arch)
 	pacman -Syu --noconfirm --needed base-devel git zstd ;;
 esac
