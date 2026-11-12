@@ -9,6 +9,7 @@ INPUTS     ?= $(CACHE)/inputs
 ASSETS     ?= $(CACHE)/assets
 DKMSDIR    ?= /usr/src/gpu-unlock-$(VERSION)
 FWDIR      ?= /usr/lib/firmware/gpu-unlock/$(NV)
+DOCDIR     ?= /usr/share/doc/gpu-unlock
 LICENSEDIR ?= /usr/share/licenses
 PKG        ?= gpu-unlock
 
@@ -65,7 +66,7 @@ install-dkms:
 	grep -qx 'PACKAGE_VERSION="$(VERSION)"' kernel/gpu_unlock/dkms.conf
 	grep -q 'MODULE_VERSION("$(VERSION)")' kernel/gpu_unlock/main.c
 	install -Dm644 -t $(DESTDIR)$(DKMSDIR) $(MODULE_FILES)
-	install -Dm644 README.md $(DESTDIR)/usr/share/doc/gpu-unlock/README.md
+	install -Dm644 README.md $(DESTDIR)$(DOCDIR)/README.md
 
 install-firmware:
 	install -Dm644 -t $(DESTDIR)$(FWDIR) $(addprefix $(ASSETS)/,$(FIRMWARE_FILES))
@@ -102,14 +103,14 @@ install:
 		case "$$distro" in \
 			arch) target=arch ;; \
 			debian|ubuntu) target=deb ;; \
-			fedora|rhel|centos) target=rpm ;; \
+			fedora|rhel|centos|suse) target=rpm ;; \
 			*) continue ;; \
 		esac; \
 		echo "Detected $$distro family; running make install-$$target"; \
 		$(MAKE) install-$$target; \
 		exit $$?; \
 	done; \
-	echo "Unsupported distribution: $${ID:-unknown}. Use make install-arch, install-deb, or install-rpm explicitly (RPM requires DNF)." >&2; \
+	echo "Unsupported distribution: $${ID:-unknown}. Use make install-arch, install-deb, or install-rpm explicitly (RPM requires DNF or zypper)." >&2; \
 	exit 1
 
 arch:
@@ -137,11 +138,21 @@ rpm: dist inputs
 	ln -s $(abspath $(INPUTS))/$(NV_SOURCE).tar.xz $(abspath $(INPUTS))/$(NV_INSTALLER) $(RPMDIR)/SOURCES/
 	rpmbuild -ba --define "_topdir $(RPMDIR)" packaging/rpm/gpu-unlock.spec
 
+# openSUSE has zypper, which cannot read build dependencies from a spec.
 install-rpm:
-	sudo dnf install -y rpm-build
-	sudo dnf builddep -y packaging/rpm/gpu-unlock.spec
+	if command -v zypper >/dev/null; then \
+		sudo zypper install -y rpm-build && \
+		sudo zypper install -y $$(rpmspec -q --buildrequires packaging/rpm/gpu-unlock.spec); \
+	else \
+		sudo dnf install -y rpm-build && \
+		sudo dnf builddep -y packaging/rpm/gpu-unlock.spec; \
+	fi
 	$(MAKE) rpm
-	sudo dnf install -y $(RPMDIR)/RPMS/noarch/gpu-unlock-*-$(VERSION)-*.noarch.rpm
+	if command -v zypper >/dev/null; then \
+		sudo zypper install -y --allow-unsigned-rpm $(RPMDIR)/RPMS/noarch/gpu-unlock-*-$(VERSION)-*.noarch.rpm; \
+	else \
+		sudo dnf install -y $(RPMDIR)/RPMS/noarch/gpu-unlock-*-$(VERSION)-*.noarch.rpm; \
+	fi
 
 # Build the module, or build, install and remove the packages, in a
 # container of each distribution.

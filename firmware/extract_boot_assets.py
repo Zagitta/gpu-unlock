@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-only
 """Build the Booter and GSP boot assets from the NVIDIA 610 generated source."""
-from __future__ import annotations
 
 import argparse
 import zlib
@@ -27,7 +26,7 @@ SOURCES = (
 
 
 
-def _array_bytes(text: str, label: str) -> tuple[bytes, bool, int]:
+def _array_bytes(text: str, label: str) -> tuple:
     marker = f'BINDATA_LABEL_{label}_data[]'
     if text.count(marker) != 1:
         raise ValueError(f"missing or duplicate {label}")
