@@ -19,37 +19,50 @@
 - See &repoURL;
 </CHANGES>
 
-<!-- Every boot: install the module for the running kernel and have it run
-     before nvidia, which the Nvidia Driver plugin loads with modprobe. -->
+<!-- Every boot: keep the module for the running kernel and the modprobe rule
+     where Unraid's rc.modules reads them on the next boot. It installs
+     /boot/config/plugins/*/packages/<kernel>/ packages named *-<krel>-*
+     and copies /boot/config/modprobe.d before udev loads nvidia, as for the
+     Nvidia Driver plugin's own package. Plugins only install after that, so
+     the softdep in /etc/modprobe.d alone is always too late. -->
 <FILE Run="/bin/bash">
 <INLINE>
 krel=$(uname -r)
 pkg=&name;-&version;_${krel//-/_}-x86_64-1.txz
-dir=&plugin;/packages
+# Package gpu-unlock, version $krel, the name rc.modules installs from.
+early=&name;-$krel-&version;.txz
+dir=&plugin;/packages/${krel%%-*}
 mkdir -p "$dir"
 # Packages of other versions and kernels.
-find "$dir" -type f ! -name "$pkg" ! -name "$pkg.md5" -delete
-if [ ! -f "$dir/$pkg.md5" ]; then
+find &plugin;/packages -type f ! -path "$dir/$early" ! -path "$dir/$early.md5" -delete
+find &plugin;/packages -mindepth 1 -type d ! -path "$dir" -empty -delete
+if [ ! -f "$dir/$early.md5" ]; then
   echo "Downloading $pkg"
-  if ! wget -q -O "$dir/$pkg" "&relURL;/$pkg" || ! wget -q -O "$dir/$pkg.md5" "&relURL;/$pkg.md5"; then
-    rm -f "$dir/$pkg" "$dir/$pkg.md5"
+  if ! wget -q -O "$dir/$early" "&relURL;/$pkg" || ! wget -q -O "$dir/$early.md5" "&relURL;/$pkg.md5"; then
+    rm -f "$dir/$early" "$dir/$early.md5"
     echo "gpu-unlock: no &version; package for kernel $krel yet, see &repoURL;/issues"
     exit 1
   fi
 fi
-if [ "$(md5sum "$dir/$pkg" | cut -d' ' -f1)" != "$(cut -d' ' -f1 "$dir/$pkg.md5")" ]; then
-  rm -f "$dir/$pkg" "$dir/$pkg.md5"
+if [ "$(md5sum "$dir/$early" | cut -d' ' -f1)" != "$(cut -d' ' -f1 "$dir/$early.md5")" ]; then
+  rm -f "$dir/$early" "$dir/$early.md5"
   echo "gpu-unlock: checksum mismatch for $pkg, install the plugin again"
   exit 1
 fi
-upgradepkg --install-new "$dir/$pkg"
+upgradepkg --install-new "$dir/$early"
 depmod -a
 
 # TARGETS is "all" or comma-separated PCI addresses, as for gpu_unlock.targets=.
+# The install rule links the firmware first: /lib/firmware is rebuilt in RAM
+# every boot and gpu_unlock loads before this script runs.
 [ -f &plugin;/&name;.cfg ] || echo 'TARGETS="all"' > &plugin;/&name;.cfg
 source &plugin;/&name;.cfg
+mkdir -p /boot/config/modprobe.d
 printf '%s\n' '# Written by the gpu-unlock plugin from &plugin;/&name;.cfg' \
-  'softdep nvidia pre: gpu_unlock' "options gpu_unlock targets=$TARGETS" > /etc/modprobe.d/&name;.conf
+  'softdep nvidia pre: gpu_unlock' "options gpu_unlock targets=$TARGETS" \
+  'install gpu_unlock /bin/ln -sfn &plugin;/firmware /lib/firmware/&name;; /sbin/modprobe --ignore-install gpu_unlock $CMDLINE_OPTS' \
+  > /boot/config/modprobe.d/&name;.conf
+cp /boot/config/modprobe.d/&name;.conf /etc/modprobe.d/&name;.conf
 
 # The firmware is generated once and kept on the flash drive.
 ln -sfn &plugin;/firmware /lib/firmware/&name;
@@ -64,7 +77,7 @@ fi
 <FILE Run="/bin/bash" Method="remove">
 <INLINE>
 removepkg &name;
-rm -f /etc/modprobe.d/&name;.conf /lib/firmware/&name;
+rm -f /boot/config/modprobe.d/&name;.conf /etc/modprobe.d/&name;.conf /lib/firmware/&name;
 rm -rf &plugin;
 echo "gpu-unlock: removed, reboot to drop the unlock"
 </INLINE>
