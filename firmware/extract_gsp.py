@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: GPL-2.0-only
 """Extract the GSP firmware and NVIDIA license from the driver installer."""
 
-from __future__ import annotations
 
 import argparse
 import re
@@ -40,7 +39,7 @@ def payload_offset(installer: Path) -> int:
     return offset
 
 
-def read_members(archive: tarfile.TarFile, names: tuple[str, ...]) -> dict[str, bytes]:
+def read_members(archive: tarfile.TarFile, names: tuple) -> dict:
     wanted = set(names)
     result = {}
     for member in archive:
@@ -60,7 +59,7 @@ def read_members(archive: tarfile.TarFile, names: tuple[str, ...]) -> dict[str, 
     return result
 
 
-def extract_members(installer: Path, names: tuple[str, ...]) -> dict[str, bytes]:
+def extract_members(installer: Path, names: tuple) -> dict:
     offset = payload_offset(installer)
     with installer.open("rb") as stream:
         stream.seek(offset)

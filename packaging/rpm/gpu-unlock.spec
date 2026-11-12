@@ -1,4 +1,7 @@
-%global nv 610.43.03
+%global nvver 610.43.03
+# The kernel only searches /lib/firmware: /usr/lib/firmware, except where
+# /lib is not merged into /usr, such as on openSUSE Leap.
+%global fwdir %(test -L /lib && echo /usr/lib/firmware || echo /lib/firmware)
 
 Name: gpu-unlock
 Version: 2.0.0
@@ -7,8 +10,8 @@ Summary: RTX 3090 BF16 unlock before the NVIDIA driver loads
 License: GPL-2.0-only
 BuildArch: noarch
 Source0: gpu-unlock-%{version}.tar.xz
-Source1: https://download.nvidia.com/XFree86/NVIDIA-kernel-module-source/NVIDIA-kernel-module-source-%{nv}.tar.xz
-Source2: https://download.nvidia.com/XFree86/Linux-x86_64/%{nv}/NVIDIA-Linux-x86_64-%{nv}-no-compat32.run
+Source1: https://download.nvidia.com/XFree86/NVIDIA-kernel-module-source/NVIDIA-kernel-module-source-%{nvver}.tar.xz
+Source2: https://download.nvidia.com/XFree86/Linux-x86_64/%{nvver}/NVIDIA-Linux-x86_64-%{nvver}-no-compat32.run
 # NVIDIA inputs stay out of the source RPM (it becomes a .nosrc.rpm).
 NoSource: 1
 NoSource: 2
@@ -52,6 +55,7 @@ test "$(cat VERSION)" = "%{version}"
 
 %install
 make DESTDIR=%{buildroot} ASSETS="$PWD/assets" \
+    DOCDIR=%{_docdir}/gpu-unlock FWDIR=%{fwdir}/gpu-unlock/%{nvver} \
     install-dkms install-firmware install-dracut
 
 %files dkms
@@ -62,7 +66,7 @@ make DESTDIR=%{buildroot} ASSETS="$PWD/assets" \
 
 %files firmware
 %license %{_defaultlicensedir}/gpu-unlock-firmware
-%{_prefix}/lib/firmware/gpu-unlock
+%{fwdir}/gpu-unlock
 
 %post dkms
 # Before 1.0.1 the old package kept its DKMS entry on upgrade; drop any

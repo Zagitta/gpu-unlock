@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-only
 """Fetch the NVIDIA inputs without executing or installing them."""
-from __future__ import annotations
 
 import argparse
 import os
@@ -39,7 +38,10 @@ def fetch(entry: dict, output: Path, offline: bool = False) -> Path:
             with tempfile.NamedTemporaryFile(dir=output, prefix=".download-", delete=False) as stream:
                 temporary = Path(stream.name)
                 total = 0
-                while block := response.read(1024 * 1024):
+                while True:
+                    block = response.read(1024 * 1024)
+                    if not block:
+                        break
                     total += len(block)
                     if total > 1024 * 1024 * 1024:
                         raise ValueError("artifact exceeds 1 GiB download limit")
@@ -50,8 +52,8 @@ def fetch(entry: dict, output: Path, offline: bool = False) -> Path:
         temporary.replace(destination)
         return destination
     finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
+        if temporary is not None and temporary.exists():
+            temporary.unlink()
 
 
 def main() -> None:
