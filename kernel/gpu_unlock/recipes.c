@@ -383,6 +383,7 @@ static const struct gu_family tu102 = {
 #define GA103(id) { id, 0x173, &ga10x }
 #define GA104(id) { id, 0x174, &ga10x }
 #define GA106(id) { id, 0x176, &ga10x }
+#define GA107(id) { id, 0x177, &ga10x }
 
 static const struct gu_card cards[] = {
 	/* TU102: RTX 2080 Ti, Titan RTX */
@@ -408,8 +409,8 @@ static const struct gu_card cards[] = {
 	/* AD104: RTX 4070 Ti, RTX 4070 SUPER, RTX 4070 */
 	AD104(0x2782), AD104(0x2783), AD104(0x2786),
 
-	/* AD106: RTX 4060 Ti, RTX 4060 Ti 16GB */
-	AD106(0x2803), AD106(0x2805),
+	/* AD106: RTX 4060 Ti, RTX 4060 Ti 16GB, RTX 4070 Laptop */
+	AD106(0x2803), AD106(0x2805), AD106(0x2820), AD106(0x2860),
 
 	/* AD107: RTX 4060, RTX 4060 Laptop, RTX 4060 Mobile, RTX 4050 Mobile */
 	AD107(0x2882), AD107(0x28a0), AD107(0x28e0), AD107(0x28e1),
@@ -430,8 +431,10 @@ static const struct gu_card cards[] = {
 	GA104(0x24e0), 
 		
 	GA106(0x2501), GA106(0x2503), GA106(0x2504), GA106(0x2505),
-	GA106(0x2507), GA106(0x2508), GA106(0x2509), GA106(0x252f),
-	GA106(0x2544),
+	GA106(0x2507), GA106(0x2508), GA106(0x2509), GA106(0x2520),
+	GA106(0x252f), GA106(0x2544), GA106(0x2560),
+
+	GA107(0x2582), GA107(0x25a0), GA107(0x25ec),
 };
 
 const struct gu_card *gu_card_find(u16 device)
