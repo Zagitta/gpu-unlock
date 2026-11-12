@@ -1,0 +1,116 @@
+# SPDX-License-Identifier: GPL-2.0-only
+name: Security scan
+
+# Not on pull_request: the SARIF upload needs security-events: write, which a
+# fork's token cannot have. A scheduled scan of main sees every merge anyway.
+on:
+  schedule:
+    - cron: '43 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+# Advisory only: nothing here fails the build on a finding. The gate on
+# correctness stays in CI.
+jobs:
+  codeql:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { language: c-cpp,   build-mode: manual }
+          - { language: python,  build-mode: none }
+          - { language: actions, build-mode: none }
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          queries: security-extended
+      # Built here, not in a distro container as in CI: CodeQL has to trace
+      # the compiler of the job's own runner. The newest headers apt has are
+      # close enough to the runner kernel for the analysis to see the code.
+      - if: matrix.language == 'c-cpp'
+        name: Build the module
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -qy --no-install-recommends build-essential linux-headers-generic
+          make -C kernel/gpu_unlock KDIR="$(ls -d /usr/src/linux-headers-* | sort -V | tail -1)"
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          category: /language:${{ matrix.language }}
+
+  semgrep:
+    runs-on: ubuntu-24.04
+    container:
+      image: semgrep/semgrep:1.185.0
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - run: >-
+          semgrep scan --metrics=off --sarif --output semgrep.sarif
+          --config p/c --config p/python
+          --config p/github-actions --config p/secrets || true
+      - uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+
+  python-and-c:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      # PyYAML because bandit's SARIF formatter is a thin wrapper over it.
+      - run: pip install --quiet bandit flawfinder pyyaml
+      - run: bandit -rq -f sarif -o bandit.sarif firmware tools tests || true
+      - run: flawfinder --sarif kernel/gpu_unlock tools > flawfinder.sarif || true
+      # A scanner that found no code at all leaves no report to upload.
+      - run: |
+          for f in bandit.sarif flawfinder.sarif; do
+              grep -q '"runs"' "$f" 2>/dev/null ||
+                  printf '{"version":"2.1.0","runs":[]}\n' > "$f"
+          done
+      - uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          sarif_file: bandit.sarif
+          category: bandit
+      - uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          sarif_file: flawfinder.sarif
+          category: flawfinder
+
+  kernel-checkers:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - run: sudo apt-get update -q &&
+          sudo apt-get install -qy --no-install-recommends build-essential sparse linux-headers-generic
+      - name: sparse
+        run: make -C kernel/gpu_unlock clean &&
+          make -C kernel/gpu_unlock KDIR="$(ls -d /usr/src/linux-headers-* | sort -V | tail -1)"
+          C=2 modules > sparse.log 2>&1 || true
+      - name: gcc -fanalyzer
+        run: make -C kernel/gpu_unlock clean &&
+          make -C kernel/gpu_unlock KDIR="$(ls -d /usr/src/linux-headers-* | sort -V | tail -1)"
+          KCFLAGS=-fanalyzer modules > analyzer.log 2>&1 || true
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: kernel-checker-logs
+          path: '*.log'
