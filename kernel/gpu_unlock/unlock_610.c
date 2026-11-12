@@ -929,6 +929,7 @@ static int unlock_transaction_gfw(struct unlock_transaction_work *work)
 {
 	ktime_t deadline = ktime_add_us(ktime_get(), GU_GFW_TIMEOUT_US);
 	int assessed = -EAGAIN;
+	unsigned int polls = 0;
 
 	for (;;) {
 		struct gpu_unlock_gfw_sample sample = { };
@@ -945,6 +946,9 @@ static int unlock_transaction_gfw(struct unlock_transaction_work *work)
 		if (!assessed) {
 			u32 ss0, ss1, wpr_hi, plm;
 
+			if (polls)
+				dev_info(&work->pdev->dev, "gpu_unlock: GFW boot was still running: done after %u polls of 1-2 ms\n",
+					 polls);
 			if (read_bar(work, work->card->family->feat_plm, &plm) ||
 			    read_bar(work, work->card->family->feat_ss0, &ss0) || ss0 == ~0u ||
 			    read_bar(work, work->card->family->feat_ss1, &ss1) || ss1 == ~0u ||
@@ -972,6 +976,7 @@ static int unlock_transaction_gfw(struct unlock_transaction_work *work)
 			return GU_RESULT(assessed);
 		if (ktime_compare(ktime_get(), deadline) >= 0)
 			return GU_RESULT(-ETIMEDOUT);
+		polls++;
 		usleep_range(1000, 2000);
 	}
 }
@@ -1614,6 +1619,11 @@ int gpu_unlock_610_unlock(const struct gu_device *device, const struct gpu_unloc
 		ret = check_devres_empty(work, "entry");
 	if (!ret)
 		ret = unlock_transaction_claim(work);
+	/* A cold card can still be running GFW: a Thunderbolt eGPU is probed
+	 * right after enumeration. Until GFW finishes, the layout registers read
+	 * back PRI errors (0xbadf....), and the layout is computed from them. */
+	if (!ret)
+		ret = unlock_transaction_gfw(work);
 	if (!ret) {
 		u32 chip;
 		if (read_bar(work, GU_PMC_BOOT_0_OFFSET, &chip) || inaccessible(chip) ||
@@ -1630,8 +1640,6 @@ int gpu_unlock_610_unlock(const struct gu_device *device, const struct gpu_unloc
 		ret = unlock_transaction_layout(work);
 	if (!ret)
 		ret = unlock_transaction_dma(work);
-	if (!ret)
-		ret = unlock_transaction_gfw(work);
 	if (!ret)
 		ret = unlock_transaction_fwsec(work);
 	if (!ret)
