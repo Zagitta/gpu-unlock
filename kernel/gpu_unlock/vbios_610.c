@@ -160,6 +160,12 @@ static int descriptor(const u8 *rom, size_t length, u64 off,
 		fw.data_off = r32(rom + off + 40);
 		fw.dmem_pa = r32(rom + off + 44);
 		fw.dmem_size = r32(rom + off + 48);
+		/* The loader DMAs this segment with the same engine, so it has to
+		 * be a multiple of 256 for the same reason as below.
+		 */
+		if (fw.dmem_size > ~(u32)0 - 255)
+			return GU_DIAG(-EINVAL);
+		fw.dmem_size = (fw.dmem_size + 255) & ~255u;
 		code_size_aligned = (fw.imem_size + 255) & ~255u;
 		data_size_aligned = (fw.dmem_size + 255) & ~255u;
 		if (!fw.imem_size || !fw.dmem_size ||
