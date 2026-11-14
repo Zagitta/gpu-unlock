@@ -1578,6 +1578,7 @@ int gpu_unlock_610_unlock(const struct gu_device *device, const struct gpu_unloc
 	struct unlock_transaction_work *work;
 	const struct gpu_unlock_610_firmware *assets;
 	const struct gpu_unlock_610_booter *booter;
+	const struct firmware *loader;
 	int ret, cleanup;
 
 	if (!device->recipe || !device->recipe->family)
@@ -1589,10 +1590,11 @@ int gpu_unlock_610_unlock(const struct gu_device *device, const struct gpu_unloc
 	work->card = device->recipe;
 	assets = gpu_unlock_610_bundle_find(shared, work->card->family->fw);
 	booter = gpu_unlock_610_booter_find(shared, work->card->family->booter);
+	loader = gpu_unlock_610_loader_find(shared, work->card->family->loader);
 	if (!assets || !assets->prepared || assets->error || !booter || !booter->fw ||
 	    !work->card->family->booter->payload ||
 	    gu_payload_check(work->card->family->booter->payload) ||
-	    (work->card->family->loader && !shared->loader)) {
+	    (work->card->family->loader && !loader)) {
 		ret = assets && assets->prepared && assets->error ? assets->error : -EINVAL;
 		pci_dev_put(work->pdev);
 		kfree(work);
@@ -1601,7 +1603,7 @@ int gpu_unlock_610_unlock(const struct gu_device *device, const struct gpu_unloc
 	work->bundle = assets;
 	work->booter = booter;
 	work->payload = work->card->family->booter->payload;
-	work->loader_fw = work->card->family->loader ? shared->loader : NULL;
+	work->loader_fw = loader;
 	dev_dbg(&pdev->dev, "recipe selection: device=%#x family=%s payload=%s privileged=%zu host=%zu launch=%u\n",
 		 pdev->device, work->card->family->name, work->payload->name,
 		 work->card->family->privileged.count, work->card->family->host.count,

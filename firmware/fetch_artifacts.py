@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 from pathlib import Path
 import tempfile
@@ -14,19 +15,32 @@ INPUTS = (
         "filename": "NVIDIA-kernel-module-source-610.43.03.tar.xz",
         "url": "https://download.nvidia.com/XFree86/NVIDIA-kernel-module-source/"
                "NVIDIA-kernel-module-source-610.43.03.tar.xz",
+        "sha256": "7e118923c7a23edc36114d63273a46e3e04e9af98695a42203e7ac2dfe9fc1dc",
     },
     {
         "filename": "NVIDIA-Linux-x86_64-610.43.03-no-compat32.run",
         "url": "https://download.nvidia.com/XFree86/Linux-x86_64/610.43.03/"
                "NVIDIA-Linux-x86_64-610.43.03-no-compat32.run",
+        "sha256": "e084451db730a6df29d3d74f655749c4d236e3c945f7d94b5205e84318fe2f90",
     },
 )
+
+
+def verify_sha256(path: Path, expected: str) -> None:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        while block := stream.read(1024 * 1024):
+            digest.update(block)
+    actual = digest.hexdigest()
+    if actual != expected:
+        raise ValueError(f"sha256 mismatch for {path.name}: expected {expected}, got {actual}")
 
 
 def fetch(entry: dict, output: Path, offline: bool = False) -> Path:
     output.mkdir(parents=True, exist_ok=True)
     destination = output / entry["filename"]
     if destination.exists():
+        verify_sha256(destination, entry["sha256"])
         return destination
     if offline:
         raise FileNotFoundError(f"missing cached artifact: {destination}")
@@ -36,6 +50,7 @@ def fetch(entry: dict, output: Path, offline: bool = False) -> Path:
         with urllib.request.urlopen(request, timeout=60) as response:
             if not response.url.startswith("https://"):
                 raise ValueError("refusing non-HTTPS redirect")
+            digest = hashlib.sha256()
             with tempfile.NamedTemporaryFile(dir=output, prefix=".download-", delete=False) as stream:
                 temporary = Path(stream.name)
                 total = 0
@@ -43,7 +58,10 @@ def fetch(entry: dict, output: Path, offline: bool = False) -> Path:
                     total += len(block)
                     if total > 1024 * 1024 * 1024:
                         raise ValueError("artifact exceeds 1 GiB download limit")
+                    digest.update(block)
                     stream.write(block)
+                if digest.hexdigest() != entry["sha256"]:
+                    raise ValueError(f"sha256 mismatch for {entry['filename']}")
                 stream.flush()
                 os.fsync(stream.fileno())
         temporary.chmod(0o644)
