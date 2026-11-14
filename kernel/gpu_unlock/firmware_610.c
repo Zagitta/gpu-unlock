@@ -177,13 +177,23 @@ static int ensure_booter(struct pci_dev *pdev, struct gpu_unlock_610_shared *sha
 static int ensure_loader(struct pci_dev *pdev, struct gpu_unlock_610_shared *shared,
 			 const char *name)
 {
+	struct gpu_unlock_610_loader *slot = NULL;
 	const struct firmware *loader = NULL;
+	unsigned int i;
 	int ret;
 
 	if (!name)
 		return 0;
-	if (shared->loader)
-		return shared->loader_name == name ? 0 : -EINVAL;
+	if (gpu_unlock_610_loader_find(shared, name))
+		return 0;
+	for (i = 0; i < GU_SHARED_LOADERS; i++) {
+		if (!shared->loader[i].name) {
+			slot = &shared->loader[i];
+			break;
+		}
+	}
+	if (!slot)
+		return -ENOSPC;
 	ret = request_scoped(&pdev->dev, &loader, name);
 	if (ret)
 		return ret;
@@ -192,8 +202,8 @@ static int ensure_loader(struct pci_dev *pdev, struct gpu_unlock_610_shared *sha
 		release_firmware(loader);
 		return -EINVAL;
 	}
-	shared->loader = loader;
-	shared->loader_name = name;
+	slot->name = name;
+	slot->fw = loader;
 	return 0;
 }
 
@@ -244,7 +254,8 @@ void gpu_unlock_610_release_shared(struct gpu_unlock_610_shared *shared)
 		release_bundle(&shared->bundle[i]);
 	for (i = 0; i < GU_SHARED_BOOTERS; i++)
 		release_firmware(shared->booter[i].fw);
-	release_firmware(shared->loader);
+	for (i = 0; i < GU_SHARED_LOADERS; i++)
+		release_firmware(shared->loader[i].fw);
 	memset(shared, 0, sizeof(*shared));
 }
 

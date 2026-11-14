@@ -27,16 +27,21 @@ struct gpu_unlock_610_booter {
 	struct gpu_unlock_booter_hdr hdr;
 };
 
-#define GU_SHARED_BUNDLES 3
-#define GU_SHARED_BOOTERS 3
+struct gpu_unlock_610_loader {
+	const char *name;
+	const struct firmware *fw;
+};
+
+#define GU_SHARED_BUNDLES 4
+#define GU_SHARED_BOOTERS 4
+#define GU_SHARED_LOADERS 2
 
 /* One coordination round. Bundles and Booters are interned by descriptor
  * pointer, so families that share a Booter load it once. */
 struct gpu_unlock_610_shared {
 	struct gpu_unlock_610_firmware bundle[GU_SHARED_BUNDLES];
 	struct gpu_unlock_610_booter booter[GU_SHARED_BOOTERS];
-	const struct firmware *loader;
-	const char *loader_name;
+	struct gpu_unlock_610_loader loader[GU_SHARED_LOADERS];
 };
 
 static inline const struct gpu_unlock_610_firmware *
@@ -64,6 +69,20 @@ gpu_unlock_610_booter_find(const struct gpu_unlock_610_shared *shared,
 	for (i = 0; i < GU_SHARED_BOOTERS; i++)
 		if (shared->booter[i].key == desc)
 			return &shared->booter[i];
+	return NULL;
+}
+
+static inline const struct firmware *
+gpu_unlock_610_loader_find(const struct gpu_unlock_610_shared *shared,
+			   const char *name)
+{
+	unsigned int i;
+
+	if (!shared || !name)
+		return NULL;
+	for (i = 0; i < GU_SHARED_LOADERS; i++)
+		if (shared->loader[i].name == name)
+			return shared->loader[i].fw;
 	return NULL;
 }
 
