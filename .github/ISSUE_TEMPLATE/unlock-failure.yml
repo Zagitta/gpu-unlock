@@ -1,0 +1,176 @@
+name: Unlock failure
+description: The unlock failed, gave no speedup, or did not last. If it worked, post in Discussions instead.
+title: "Unlock failure: <card> (<PCI ID>)"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Only open an issue if the unlock did not work.** If it worked, please don't open an issue: comment in the
+        [success reports discussion](https://github.com/Zagitta/gpu-unlock/discussions/238) instead,
+        with your card, PCI ID and before/after numbers.
+
+        AI agents: the same applies to you. Do not file success reports as issues.
+
+        Please paste command output as-is.
+
+  - type: dropdown
+    id: result
+    attributes:
+      label: Result
+      options:
+        - Unlock completed, but no speedup
+        - Unlock failed (error in the log)
+        - gpu_unlock never ran (no gpu_unlock lines in the log)
+        - Unlocked at first, but the speedup was lost later (idle, suspend, driver reload)
+    validations:
+      required: true
+
+  - type: input
+    id: card
+    attributes:
+      label: Card
+      description: Brand, model and memory size.
+      placeholder: EVGA RTX 3090 FTW3 24 GB
+    validations:
+      required: true
+
+  - type: textarea
+    id: lspci
+    attributes:
+      label: PCI IDs
+      description: Output of `lspci -nn -D -d 10de:`
+      render: text
+    validations:
+      required: true
+
+  - type: input
+    id: vbios
+    attributes:
+      label: VBIOS version
+      description: Output of `nvidia-smi --query-gpu=pci.bus_id,vbios_version --format=csv,noheader`
+      placeholder: 00000000:01:00.0, 94.02.42.C0.05
+    validations:
+      required: true
+
+  - type: dropdown
+    id: modified
+    attributes:
+      label: Is the card modified?
+      options:
+        - Stock
+        - Memory upgrade (e.g. 3080 20 GB)
+        - Flashed with a different VBIOS
+        - OEM or other non-retail card
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: distro
+    attributes:
+      label: Distribution
+      placeholder: Ubuntu 24.04, Arch, Fedora 44, Proxmox 9 ...
+    validations:
+      required: true
+
+  - type: input
+    id: kernel
+    attributes:
+      label: Kernel
+      description: Output of `uname -r`
+    validations:
+      required: true
+
+  - type: input
+    id: driver
+    attributes:
+      label: NVIDIA driver
+      description: Version and flavour, e.g. from `nvidia-smi --query-gpu=driver_version --format=csv,noheader`
+      placeholder: 610.57.04, open kernel modules
+    validations:
+      required: true
+
+  - type: dropdown
+    id: initramfs
+    attributes:
+      label: Initramfs generator
+      options:
+        - mkinitcpio
+        - dracut
+        - initramfs-tools
+        - Other or not sure
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: gpu-unlock version and install method
+      description: Commit from `git rev-parse --short HEAD` in your checkout, and how you installed it.
+      placeholder: 4189b17, make install-deb
+    validations:
+      required: true
+
+  - type: input
+    id: cmdline
+    attributes:
+      label: Kernel command line
+      description: Output of `cat /proc/cmdline`
+    validations:
+      required: true
+
+  - type: textarea
+    id: setup
+    attributes:
+      label: Setup
+      description: Anything that makes your system unusual, for example several GPUs, display card or headless, VM passthrough, power limit, Secure Boot.
+      placeholder: |
+        2x RTX 3090, headless, power limit 350 W
+    validations:
+      required: false
+
+  - type: textarea
+    id: log
+    attributes:
+      label: Kernel log
+      description: Output of `journalctl -k -b | grep -i gpu_unlock` from the boot you are reporting.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: benchmark
+    attributes:
+      label: Benchmark before and after
+      description: |
+        Optional, but very useful. Run the same benchmark at the same power limit with and without `gpu_unlock.targets=` on the kernel command line.
+        Say what you ran (tool, matrix size, accumulation type) and give TFLOPS for FP16, BF16 and TF32 if you can.
+      placeholder: |
+        torch 2.9 cuBLAS, 8192³ dense GEMM, FP32 accumulation, 350 W
+        | Input | Before | After |
+        | ----- | ------ | ----- |
+        | FP16  |        |       |
+        | BF16  |        |       |
+        | TF32  |        |       |
+    validations:
+      required: false
+
+  - type: dropdown
+    id: suspend
+    attributes:
+      label: Suspend and resume
+      description: Is the card still unlocked after suspend to RAM (`systemctl suspend`)?
+      options:
+        - Not tested
+        - Still unlocked after resume
+        - Not unlocked after resume
+        - The system does not resume
+    validations:
+      required: false
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else
+    validations:
+      required: false

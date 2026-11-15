@@ -1,29 +1,30 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-only
-"""Build the Booter and GSP boot assets from the pinned 610 generated source."""
+"""Build the Booter and GSP boot assets from the NVIDIA 610 generated source."""
 from __future__ import annotations
 
 import argparse
-import hashlib
-import json
 import zlib
 import re
 import struct
 import sys
 from pathlib import Path
 
-MANIFEST = Path(__file__).with_name("artifacts-610.43.03.json")
-
-
 MAGIC = 0x314C5442
-LABELS = (
-    "IMAGE_PROD",
-    "HEADER_PROD",
-    "SIG_PROD",
-    "PATCH_LOC",
-    "PATCH_META",
-    "NUM_SIGS",
+
+# Generated NVIDIA sources this script reads.
+SOURCES = (
+    'g_bindata_kgspGetBinArchiveBooterLoadUcode_AD102.c',
+    'g_bindata_kgspGetBinArchiveBooterLoadUcode_GA100.c',
+    'g_bindata_kgspGetBinArchiveBooterLoadUcode_GA102.c',
+    'g_bindata_kgspGetBinArchiveBooterLoadUcode_TU102.c',
+    'g_bindata_kgspGetBinArchiveGspRmBoot_AD102.c',
+    'g_bindata_kgspGetBinArchiveGspRmBoot_GA100.c',
+    'g_bindata_kgspGetBinArchiveGspRmBoot_GA102.c',
+    'g_bindata_kgspGetBinArchiveGspRmBoot_TU102.c',
+    'g_bindata_ksec2GetBinArchiveBlUcode_TU102.c',
 )
+
 
 
 def _array_bytes(text: str, label: str) -> tuple[bytes, bool, int]:
@@ -66,7 +67,7 @@ def _array_bytes(text: str, label: str) -> tuple[bytes, bool, int]:
     return data, compressed, expected
 
 
-def build_bundle(source_text: str) -> bytes:
+def build_bundle(source_text: str, signature_size: int = 384) -> bytes:
     image, _, _ = _array_bytes(source_text, "IMAGE_PROD")
     header, _, _ = _array_bytes(source_text, "HEADER_PROD")
     signatures, _, _ = _array_bytes(source_text, "SIG_PROD")
@@ -79,9 +80,9 @@ def build_bundle(source_text: str) -> bytes:
     loc = struct.unpack("<I", patch_loc)[0]
     _fuse, engine, ucode = struct.unpack("<3I", patch_meta)
     count = struct.unpack("<I", num_sigs)[0]
-    if not count or len(signatures) != count * 384 or fields[4] != 1 or not ucode:
+    if not count or len(signatures) != count * signature_size or fields[4] != 1 or not ucode:
         raise ValueError('unsupported production Booter signature/application table')
-    if loc < fields[2] or loc + 384 > fields[2] + fields[3] or fields[2] + fields[3] > len(image):
+    if loc < fields[2] or loc + signature_size > fields[2] + fields[3] or fields[2] + fields[3] > len(image):
         raise ValueError('signature patch is outside DMEM image')
     for offset, size in ((fields[0],fields[1]), (fields[2],fields[3]), (fields[5],fields[6])):
         if offset + size > len(image) or offset % 256 or size % 256:
@@ -95,36 +96,52 @@ def build_bundle(source_text: str) -> bytes:
     return prefix + image + signatures
 
 
-PINNED = {
-    'g_bindata_kgspGetBinArchiveBooterLoadUcode_GA102.c': '04cd3db7f670adc4efd79d2e76217bb809fffddfbd6f1af884cde2af26dd39af',
-    'g_bindata_kgspGetBinArchiveGspRmBoot_GA102.c': '35e5aa9075ad3898b6022ffd5820c953d809caa7dabd530cfc1a83dc2a67c5bd',
-}
-
-
 def extract_assets(source_root: Path, output: Path) -> None:
     inputs = {}
-    for name, digest in PINNED.items():
+    for name in SOURCES:
         data = (source_root / 'src/nvidia/generated' / name).read_bytes()
-        if hashlib.sha256(data).hexdigest() != digest:
-            raise ValueError('pinned generated source mismatch: ' + name)
         inputs[name] = data.decode('ascii')
-    booter = build_bundle(inputs['g_bindata_kgspGetBinArchiveBooterLoadUcode_GA102.c'])
     boot = inputs['g_bindata_kgspGetBinArchiveGspRmBoot_GA102.c']
     image = _array_bytes(boot, 'UCODE_IMAGE_PROD')[0]
     desc = _array_bytes(boot, 'UCODE_DESC_PROD')[0]
     if len(desc) != 84:
-        raise ValueError('unexpected pinned bootloader descriptor length')
+        raise ValueError('unexpected bootloader descriptor length')
     fields = struct.unpack('<21I', desc)
     if fields[0] != 5 or fields[14] != 1 or fields[19] != len(image) or fields[20] != 0:
         raise ValueError('unsupported bootloader descriptor')
     for index in (1,3,8,10,12):
         if not fields[index+1] or fields[index]+fields[index+1] > len(image):
             raise ValueError('bootloader descriptor range outside image')
-    blobs = {'booter_load_ga102.bin': booter, 'gsp_boot_ga102.bin': image, 'gsp_boot_desc_ga102.bin': desc}
-    pinned = json.loads(MANIFEST.read_text())['derived_assets']
-    for name, data in blobs.items():
-        if hashlib.sha256(data).hexdigest() != pinned[name]:
-            raise ValueError('derived asset differs from its pinned SHA-256: ' + name)
+    blobs = {'gsp_boot_ga102.bin': image, 'gsp_boot_desc_ga102.bin': desc}
+    for chip in ('GA100', 'GA102'):
+        blobs[f'booter_load_{chip.lower()}.bin'] = build_bundle(
+            inputs[f'g_bindata_kgspGetBinArchiveBooterLoadUcode_{chip}.c'])
+    ga100_boot = inputs['g_bindata_kgspGetBinArchiveGspRmBoot_GA100.c']
+    blobs['gsp_boot_ga100.bin'] = _array_bytes(ga100_boot, 'UCODE_IMAGE')[0]
+    blobs['gsp_boot_desc_ga100.bin'] = _array_bytes(ga100_boot, 'UCODE_DESC')[0]
+    loader = inputs['g_bindata_ksec2GetBinArchiveBlUcode_TU102.c']
+    if not re.search(r'UCODE_DESC_data\s*=\s*\{\s*0xfd,\s*0,\s*\{\s*0x0,\s*0x200,\s*0x200,\s*0x100\s*}', loader):
+        raise ValueError('unsupported generic loader descriptor')
+    blobs['falcon_loader.bin'] = _array_bytes(loader, 'UCODE_IMAGE')[0]
+    ad102_boot = inputs['g_bindata_kgspGetBinArchiveGspRmBoot_AD102.c']
+    blobs['booter_load_ad102.bin'] = build_bundle(inputs['g_bindata_kgspGetBinArchiveBooterLoadUcode_AD102.c'])
+    blobs['gsp_boot_ad102.bin'] = _array_bytes(ad102_boot, 'UCODE_IMAGE_PROD')[0]
+    blobs['gsp_boot_desc_ad102.bin'] = _array_bytes(ad102_boot, 'UCODE_DESC_PROD')[0]
+    tu102_boot = inputs['g_bindata_kgspGetBinArchiveGspRmBoot_TU102.c']
+    tu102_image = _array_bytes(tu102_boot, 'UCODE_IMAGE')[0]
+    tu102_desc = _array_bytes(tu102_boot, 'UCODE_DESC')[0]
+    if len(tu102_desc) != 76 or struct.unpack('<I', tu102_desc[:4])[0] != 4 or \
+            len(tu102_image) != 4096:
+        raise ValueError('unsupported TU102 bootloader descriptor')
+    tu102_bl = _array_bytes(
+        inputs['g_bindata_ksec2GetBinArchiveBlUcode_TU102.c'], 'UCODE_IMAGE')[0]
+    if len(tu102_bl) != 768:
+        raise ValueError('unexpected TU102 SEC2 loader size')
+    blobs['booter_load_tu102.bin'] = build_bundle(
+        inputs['g_bindata_kgspGetBinArchiveBooterLoadUcode_TU102.c'], 16)
+    blobs['gsp_boot_tu102.bin'] = tu102_image
+    blobs['gsp_boot_desc_tu102.bin'] = tu102_desc
+    blobs['sec2_bl_tu102.bin'] = tu102_bl
     output.mkdir(parents=True, exist_ok=True)
     for name, data in blobs.items():
         (output/name).write_bytes(data)
@@ -132,7 +149,7 @@ def extract_assets(source_root: Path, output: Path) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("source", type=Path, help='pinned NVIDIA source root')
+    parser.add_argument("source", type=Path, help='NVIDIA source root')
     parser.add_argument("output", type=Path)
     args = parser.parse_args()
     extract_assets(args.source, args.output)

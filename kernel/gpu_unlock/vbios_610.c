@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "diagnostic.h"
 /* Formats: NVIDIA 610.43.03 kernel_gsp_fwsec.c and kernel_gsp_vbios_tu102.c.
+ * The PROM contains the full VBIOS container; locate the IFR image offset the
+ * same way kgspExtractVbiosFromRom_TU102 does before parsing the legacy image.
  * Independent byte parser; no firmware-owned pointer is trusted as a host pointer.
  */
 #ifdef __KERNEL__
@@ -11,6 +13,11 @@
 #include <string.h>
 #endif
 #include "vbios_610.h"
+
+/* FWSEC application selected for the VBIOS request. */
+#ifndef GPU_UNLOCK_FWSEC_APP
+#define GPU_UNLOCK_FWSEC_APP 0x85
+#endif
 
 static u16 r16(const u8 *p)
 {
@@ -119,6 +126,54 @@ static int descriptor(const u8 *rom, size_t length, u64 off,
 	size = hdr >> 16;
 	GU_NOTE("FWSEC descriptor: offset=%#llx ROM_bytes=%zu header=%#x\n",
 		(unsigned long long)off, length, hdr);
+	fw.version = (hdr >> 8) & 0xff;
+	/* v2 generic-loader descriptor. TU102 and GA100 share this layout, but
+	 * TU102 uses a non-zero secure IMEM base inside the same image. */
+	if ((hdr & 1) && fw.version == 2) {
+		u32 sec_base, sec_size, code_size_aligned, data_size_aligned;
+
+		if (size < 60 || range(length, off, size))
+			return GU_DIAG(-EINVAL);
+		/* The generic loader starts at zero and loads DMEM at zero. */
+		if (r32(rom + off + 12) || r32(rom + off + 44))
+			return GU_DIAG(-EINVAL);
+		stored = r32(rom + off + 4);
+		if (!stored || stored > ~(u32)0 - 255)
+			return GU_DIAG(-EINVAL);
+		fw.image_size = (stored + 255) & ~255u;
+		if (range(length, off + size, fw.image_size))
+			return GU_DIAG(-EINVAL);
+		fw.image_off = off + size;
+		fw.interface_off = r32(rom + off + 16);
+		fw.imem_pa = r32(rom + off + 20);
+		fw.imem_size = r32(rom + off + 24);
+		fw.imem_va = r32(rom + off + 28);
+		sec_base = r32(rom + off + 32);
+		sec_size = r32(rom + off + 36);
+		if (sec_size > fw.imem_size || sec_size > ~(u32)0 - 255 ||
+		    sec_base < fw.imem_va ||
+		    sec_base - fw.imem_va > ~(u32)0 - fw.imem_pa)
+			return GU_DIAG(-EINVAL);
+		fw.imem_sec_size = (sec_size + 255) & ~255u;
+		fw.imem_ns_size = fw.imem_size - sec_size;
+		fw.imem_sec_pa = sec_base - fw.imem_va + fw.imem_pa;
+		fw.data_off = r32(rom + off + 40);
+		fw.dmem_pa = r32(rom + off + 44);
+		fw.dmem_size = r32(rom + off + 48);
+		code_size_aligned = (fw.imem_size + 255) & ~255u;
+		data_size_aligned = (fw.dmem_size + 255) & ~255u;
+		if (!fw.imem_size || !fw.dmem_size ||
+		    range(fw.image_size, 0, fw.imem_size) ||
+		    range(fw.image_size, fw.imem_sec_pa, fw.imem_sec_size) ||
+		    range(fw.image_size, fw.data_off, fw.dmem_size) ||
+		    range(code_size_aligned, fw.imem_pa, fw.imem_size) ||
+		    range(code_size_aligned, fw.imem_sec_pa, fw.imem_sec_size) ||
+		    range(data_size_aligned, fw.dmem_pa, fw.dmem_size) ||
+		    range(fw.dmem_size, fw.interface_off, 4))
+			return GU_DIAG(-EINVAL);
+		*out = fw;
+		return 0;
+	}
 	/* vDesc: bit 0 set, version in bits 15:8, size in bits 31:16. */
 	if (!(hdr & 1) || ((hdr >> 8) & 0xff) != 3 || size < 44)
 		return GU_DIAG(-EOPNOTSUPP);
@@ -158,6 +213,7 @@ static int descriptor(const u8 *rom, size_t length, u64 off,
 	    count != fw.sig_count || fw.sig_bytes != count * 384 ||
 	    !fw.imem_size || !fw.dmem_size ||
 	    range(fw.image_size, fw.data_off, fw.dmem_size) ||
+	    range(fw.image_size, fw.data_off, ((u64)fw.dmem_size + 255) & ~255ull) ||
 	    range(fw.dmem_size, fw.pkc_off, 384) ||
 	    range(fw.dmem_size, fw.interface_off, 4))
 		return GU_DIAG(-EINVAL);
@@ -167,12 +223,40 @@ static int descriptor(const u8 *rom, size_t length, u64 off,
 
 int gpu_unlock_vbios_fwsec(const u8 *rom, size_t length, struct gpu_unlock_fwsec *out)
 {
-	u32 bit, adjust;
+	u32 bit, adjust, image = 0;
 	int ret;
 
 	if (!rom || !out || length > 1024 * 1024)
 		return GU_DIAG(-EINVAL);
 	memset(out, 0, sizeof(*out));
+
+	/* The GPU exposes the complete VBIOS container through the PROM
+	 * window.  NVIDIA's kgspExtractVbiosFromRom_TU102 walks the IFR
+	 * header to the first PCI expansion image; match that here instead of
+	 * requiring the container to start with 0xaa55. */
+	if (length >= 12 && r32(rom) == 0x4947564eu) {
+		u32 version = (r32(rom + 4) >> 8) & 0xffu;
+		if (version != 3)
+			return GU_DIAG(-EOPNOTSUPP);
+		{
+			u32 total = r32(rom + 8) & 0xfffffu;
+			u32 flash, dir;
+			if (range(length, total, 4))
+				return GU_DIAG(-EINVAL);
+			flash = r32(rom + total);
+			dir = flash + 0x1000u;
+			if (range(length, dir, 12) || r32(rom + dir) != 0x44524652u)
+				return GU_DIAG(-EINVAL);
+			image = r32(rom + dir + 8);
+		}
+		if (!image || (image & 3u) || range(length, image, 2) ||
+		    r16(rom + image) != 0xaa55u)
+			return GU_DIAG(-EINVAL);
+		GU_NOTE("ROM image: container NVGI version 3 image=%#x\n", image);
+		rom += image;
+		length -= image;
+	}
+
 	ret = expansion(rom, length, &adjust);
 	if (ret)
 		return GU_DIAG(ret);
@@ -217,9 +301,16 @@ int gpu_unlock_vbios_fwsec(const u8 *rom, size_t length, struct gpu_unlock_fwsec
 			for (j = 0; j < rom[table + 3]; j++) {
 				const u8 *entry = rom + table + rom[table + 1] + j * rom[table + 2];
 
-				if (entry[0] == 0x85)
-					return GU_DIAG(descriptor(rom, length,
-							  (u64)adjust + r32(entry + 2), out));
+				if (entry[0] == GPU_UNLOCK_FWSEC_APP) {
+					ret = descriptor(rom, length,
+							  (u64)adjust + r32(entry + 2), out);
+					if (!ret) {
+						out->image_off += image;
+						if (out->sig_off)
+							out->sig_off += image;
+					}
+					return GU_DIAG(ret);
+				}
 			}
 		}
 	}
@@ -288,6 +379,8 @@ int gpu_unlock_fwsec_patch_frts(u8 *image, const struct gpu_unlock_fwsec *fw, u6
 		return GU_DIAG(-EOPNOTSUPP);
 	cmd_off = r32(mapper + 8);
 	cmd_size = r32(mapper + 12);
+	GU_NOTE("FWSEC mapper offset=%#zx init_before=%#x cmd_off=%#x cmd_size=%#x\n",
+		(size_t)(mapper - dmem), r32(mapper + 44), cmd_off, cmd_size);
 	if (cmd_size < sizeof(cmd) || range(fw->dmem_size, cmd_off, cmd_size))
 		return GU_DIAG(-EINVAL);
 	w32(cmd, 1);
@@ -300,5 +393,7 @@ int gpu_unlock_fwsec_patch_frts(u8 *image, const struct gpu_unlock_fwsec *fw, u6
 	w32(cmd + 40, 2);
 	memcpy(dmem + cmd_off, cmd, sizeof(cmd));
 	w32(mapper + 44, 0x15);
+	GU_NOTE("FWSEC mapper patched init=%#x cmd0=%#x cmd4=%#x\n",
+		r32(mapper + 44), r32(dmem + cmd_off), r32(dmem + cmd_off + 4));
 	return 0;
 }

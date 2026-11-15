@@ -1,61 +1,86 @@
-# GPU unlock 1.0.0
+![gpu-unlock: full-speed tensor cores for GeForce RTX](assets/banner.svg)
 
-Unlock FP/BF16 instruction issue rate on Nvidia 3000's cards to their professional equivalents
+### Your GeForce runs AI at half speed. This fixes it.
 
-This Linux kernel module combines the CMP unlocker's V67/PLM technique with the pre-driver timing of the UEFI approach. It runs the unlock, writes the speed selectors (SS0 `0x88888888`, which selects the full BF16 rate, and the 4-bit SS1 `0x8` IMLA4) and performs FLR before the unmodified NVIDIA driver binds the card. It is neither a UEFI application nor a patched NVIDIA driver. 
+![Version](https://img.shields.io/badge/version-2.0.0-76b900)![RTX 20 | 30 | 40](https://img.shields.io/badge/GeForce-RTX%2020%20%7C%2030%20%7C%2040-76b900?logo=nvidia&logoColor=white)![Linux](https://img.shields.io/badge/platform-Linux-informational?logo=linux&logoColor=white)![License GPL-2.0](https://img.shields.io/badge/license-GPL--2.0-blue)![Stars](https://img.shields.io/github/stars/Zagitta/gpu-unlock?style=flat&color=yellow)
 
-The benefit of this early kmod driver is that it does not require manual patching each time nvidia releases a new driver version.
+**Up to 2× FP16 / BF16 / TF32 tensor throughput** · **+25–55% LLM prefill** · **+25–50% fine-tuning** · **+30–55% image generation**
 
-The effect of this unlock is that it doubles the instruction issuing speed of FP/BF16 FMA into FP32 operations on GA102, GA103, GA104 and GA106 cards.
+[Supported GPUs](#supported-gpus) · [Benchmarks](#what-you-get) · [Install](#how-to-install) · [FAQ](#faq) · [Support](#support-me)
 
-[3090 Ti dense 8192³ GEMM at 450 W, five-sample medians with FP32 accumulation](https://github.com/Zagitta/gpu-unlock/issues/1#issue-5905622687):
+---
 
+NVIDIA ships GeForce cards with their tensor cores capped to **half speed** for
+FP16, BF16 and TF32 math with FP32 accumulation, which is what nearly all AI
+training and unquantized inference uses. The same silicon sold as an RTX A-series
+or professional card runs at full rate. `gpu_unlock` removes that cap at boot,
+before the stock NVIDIA driver loads. No patched driver, no VBIOS flash, nothing
+to redo when NVIDIA releases a new driver.
 
-| Input | Before       | After         |
-| ----- | ------------ | ------------- |
-| FP16  | 87.46 TFLOPS | 118.39 TFLOPS |
-| BF16  | 87.50 TFLOPS | 157.41 TFLOPS |
-| TF32  | 42.58 TFLOPS | 82.61 TFLOPS  |
+---
 
-## Tested cards
+## Supported GPUs
 
-Results reported by users. The module accepts every GeForce ID listed in
-`kernel/gpu_unlock/main.c`, but the cards below are the ones someone has
-reported on. Please add yours with a
-[compatibility report](https://github.com/Zagitta/gpu-unlock/issues/new?template=compatibility-report.yml),
-whether it worked or not.
+| Generation                | Cards                                                                                                                  | Status                    |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------- |
+| **Ampere** (RTX 30)       | RTX 3050, 3060, 3060 Ti, 3070, 3070 Ti, 3080, 3080 Ti, 3090, 3090 Ti, plus RTX 3070/3080 Laptop GPUs                   | Stable, 100+ user reports |
+| **Ada Lovelace** (RTX 40) | RTX 4060, 4060 Ti, 4070, 4070 SUPER, 4070 Ti, 4070 Ti SUPER, 4080, 4080 SUPER, 4090, 4090 D, RTX 4050/4060 Laptop GPUs | Experimental              |
+| **Turing** (RTX 20)       | RTX 2060, 2060 SUPER, 2070, 2070 SUPER, 2080, 2080 SUPER, 2080 Ti, Titan RTX                                           | Experimental              |
+| Blackwell (RTX 50)        |                                                                                                                        | Not supported             |
 
-| Chip  | Card                              | PCI ID      | Result                              | BF16 GEMM gain | Reports |
-| ----- | --------------------------------- | ----------- | ----------------------------------- | -------------- | ------- |
-| GA102 | RTX 3090 Ti                       | `10de:2203` | Unlocked                            | +68–80%        | [#1](https://github.com/Zagitta/gpu-unlock/issues/1) |
-| GA102 | RTX 3090                          | `10de:2204` | Unlocked                            | +25–67%        | [#5](https://github.com/Zagitta/gpu-unlock/issues/5), [#9](https://github.com/Zagitta/gpu-unlock/issues/9), [#10](https://github.com/Zagitta/gpu-unlock/issues/10), [#17](https://github.com/Zagitta/gpu-unlock/issues/17), [#25](https://github.com/Zagitta/gpu-unlock/issues/25), [#27](https://github.com/Zagitta/gpu-unlock/issues/27), [#33](https://github.com/Zagitta/gpu-unlock/issues/33) |
-| GA102 | RTX 3080 Ti 20 GB (OEM, GA102-250) | `10de:2205` | Unlock completes, BF16 stays at half rate | —        | [#28](https://github.com/Zagitta/gpu-unlock/issues/28) |
-| GA102 | RTX 3080 10 GB                    | `10de:2206` | Unlocked                            | +70–73%        | [#14](https://github.com/Zagitta/gpu-unlock/issues/14) |
-| GA102 | RTX 3080 20 GB (memory upgrade)   | `10de:2206` | Unlocked                            | +56–59%        | [#10](https://github.com/Zagitta/gpu-unlock/issues/10), [#15](https://github.com/Zagitta/gpu-unlock/issues/15) |
-| GA104 | RTX 3070                          | `10de:2484` | Unlocked                            | +73–81%        | [#10](https://github.com/Zagitta/gpu-unlock/issues/10), [#12](https://github.com/Zagitta/gpu-unlock/issues/12) |
-| GA104 | RTX 3070 Ti                       | `10de:2482` | Not tested with this module (the same unlock worked from a UEFI port on Windows) | — | [#32](https://github.com/Zagitta/gpu-unlock/issues/32) |
-| GA106 | RTX 3060 12 GB                    | `10de:2504` | Unlocked                            | about +80%     | [#13](https://github.com/Zagitta/gpu-unlock/pull/13), [#31](https://github.com/Zagitta/gpu-unlock/issues/31) |
-| GA103 | any                               | `10de:2414` | No reports yet                      | —              | — |
+Laptops only stay unlocked if the dedicated GPU is never fully powered off.  
+Many laptops power it down when idle, which silently resets the unlock. Turning  
+off runtime power management with `options nvidia NVreg_DynamicPowerManagement=0x00`
+in `/etc/modprobe.d/` helps on some models, but expect mixed results.
 
-The gains are dense GEMM throughput from each report's own benchmark, so
-they are not directly comparable. The power limit matters a lot: the lowest
-figure (+25%) is from cards capped at 225 W.
+The exact PCI device IDs are in [`kernel/gpu_unlock/recipes.c`](kernel/gpu_unlock/recipes.c).
+Linux only. For Windows see the [FAQ](#faq).
 
-Matrix-heavy work speeds up: LLM prefill (+14–36% in
-[#9](https://github.com/Zagitta/gpu-unlock/issues/9),
-[#15](https://github.com/Zagitta/gpu-unlock/issues/15),
-[#25](https://github.com/Zagitta/gpu-unlock/issues/25) and
-[#33](https://github.com/Zagitta/gpu-unlock/issues/33)), diffusion and
-FlashAttention. LLM decode, which is limited by memory bandwidth, and INT8
-work stay about the same. The reports that compared outputs found them
-bit-identical before and after.
+---
 
-Reports also cover up to four cards in one machine, the card driving the
-display, and cards passed through to a VM with vfio-pci
-([#17](https://github.com/Zagitta/gpu-unlock/issues/17)).
+## What you get
 
+The tensor core rate doubles. How much of that you see depends on how much of
+your workload is FP16/BF16/TF32 matrix math, and on whether the card has the
+power headroom to run it.
 
+Dense matrix multiply (FP32 accumulation, stock power limits):
 
+| Card | BF16 before | BF16 after | Gain |
+| --- | --- | --- | --- |
+| RTX 3060 12 GB | 27 TFLOPS | 51 TFLOPS | +87% |
+| RTX 3060 Ti | 37 TFLOPS | 68 TFLOPS | +82% |
+| RTX 3070 | 40 TFLOPS | 72 TFLOPS | +81% |
+| RTX 3080 10 GB | 65 TFLOPS | 113 TFLOPS | +73% |
+| RTX 3090 | 75 TFLOPS | 125 TFLOPS | +65% |
+| RTX 3090 Ti (450 W) | 88 TFLOPS | 157 TFLOPS | +80% |
+| RTX 4070 Ti | 81 TFLOPS | 150 TFLOPS | +84% |
+| RTX 4080 | 104 TFLOPS | 193 TFLOPS | +87% |
+| RTX 4090 | 165 TFLOPS | 329 TFLOPS | +100% (peak MMA rate) |
+
+The RTX 4090 runs out of power before it runs out of tensor cores, so large
+GEMMs at stock power limits gain much less than the peak rate suggests.
+
+Real workloads:
+
+| Workload | Typical speedup |
+| --- | --- |
+| LLM prefill / prompt processing, FP16/BF16 or AWQ/GPTQ (vLLM, PyTorch, Transformers) | +25–55% |
+| Time to first token | 25–30% lower |
+| LoRA and full fine-tuning in BF16 | +25–50% |
+| Image generation, FP16/BF16 (SDXL, SD 1.5, Krea, DiT models in ComfyUI) | +30–55% |
+| Video generation, BF16 compute (Wan 2.2) | +15–20% |
+| FlashAttention / SDPA kernels | +50–60% |
+| llama.cpp / Ollama with quantized GGUF | 0–15%, mostly at long context |
+| LLM decode / token generation (memory bound) | No change |
+| INT8, FP8 and INT4 models | No change |
+| Gaming and FP32 CUDA | No change |
+
+Outputs are bit-identical before and after; only the speed changes. These
+numbers come from the [compatibility reports](https://github.com/Zagitta/gpu-unlock/issues)
+users have filed, where you can find full benchmark details and post your own.
+
+---
 
 ## How to install
 
@@ -81,14 +106,29 @@ in `/etc/default/grub`, then run `sudo update-grub`.
 - **UKI / generated entries:** add it to `/etc/kernel/cmdline` and regenerate
 your boot images/entries (e.g. `sudo mkinitcpio -P` for mkinitcpio UKIs).
 
+# FAQ
 
+- Q: Do you have a website/coin/installer?  
+A: No this is the one and only OG source for gpu-unlock. Crypto, websites, installers and what else is not associated with this project or the developer in any way shape or form. 
+- Q: Does this depend on a specific driver version? I see `610.43.03` is pinned.  
+A: No the driver is only fetched to extract firmware this unlock depends on    
+- Q: What about Windows?  
+A: I don't run windows and don't plan to maintain it but [https://github.com/impacifist/Windows-GPU-UNLOCK](https://github.com/impacifist/Windows-GPU-UNLOCK) has built a port, YMMV.   
+There are windows installer's floating around but I would recommend being ++**very**++ careful with those.
+- Q: What about Blackwell (RTX 50)?  
+A: Not supported and unlikely to happen.    
+- Q: Why did Nvidia handicap my GPU?  
+A: Market segmentation, they want businesses to purchase the professional cards without these limitations at significantly higher prices.
+- Q: Does this hurt my GPU?  
+A: It's very unlikely, this only unlocks a small handicap Nvidia has put in place to differentiate datacenter and professional cards from consumer versions. It may heat up your GPU slightly because it now does more compute but the standard throttling and power management remains completely intact and should downclock.    
+- Q: How can I assist?  
+A: Please consider [donating](#support-me) so I can purchase more GPUs <3
 
 ## Local build
 
-Every build downloads the pinned NVIDIA/CachyOS inputs over HTTPS, checks
-their SHA-256, and generates firmware only in the build directory and the
-binary package. All three formats install through the same `make install-*`
-targets. Packages are built from the committed `HEAD`.
+Every build downloads the NVIDIA/CachyOS inputs over HTTPS and generates
+firmware only in the build directory and the binary package. All three formats install through the same `make install-*`
+targets. Packages are built from the working tree, uncommitted changes included.
 
 Build, install build dependencies, and install the packages in one step
 (asks for your sudo password):
@@ -112,6 +152,14 @@ pbuilder) needs `GPU_UNLOCK_INPUTS` pointing at that cache.
 The `make dist` archive, the Debian source package and the `.nosrc.rpm`
 contain no NVIDIA archives or generated firmware.
 
+## How it works
+
+This Linux kernel module combines the cmpunlocker's V67/PLM technique with the
+pre-driver timing of the UEFI approach. At boot it runs the unlock, writes the
+speed selectors (SS0 `0x88888888`, which selects the full BF16 rate, and the
+4-bit SS1 `0x8` IMLA4) and performs an FLR before the unmodified NVIDIA driver
+binds the card. It is neither a UEFI application nor a patched NVIDIA driver.
+
 ## Boot flow and opt-in
 
 The packages put `gpu_unlock` and its firmware in the initramfs and load it
@@ -124,20 +172,7 @@ last and still runs before an `nvidia` loaded from the root filesystem.
 Images are rebuilt on install. mkinitcpio ignores drop-ins for an image
 built with `-c <config>` or a preset `_config`; put `gpu_unlock` right
 before `nvidia` in that config's `MODULES` yourself.
-- **initramfs-tools:** `/usr/share/initramfs-tools/modules.d/gpu-unlock.conf`,
-the hook `/usr/share/initramfs-tools/hooks/gpu-unlock` and the script
-`/usr/share/initramfs-tools/scripts/init-premount/gpu-unlock`. For a
-kernel that has an `nvidia` module, the hook also puts `nvidia_drm`, its
-dependencies and their firmware in the image, and the script loads them
-right after `gpu_unlock`, before any LUKS passphrase prompt. A display
-card then shows the initramfs's own prompts. This adds about 90 MB to
-each image, most of it the driver's GSP firmware; check the free space
-on `/boot`. udev would otherwise load `nvidia` first, by its PCI ID, so
-the hook blacklists it inside the image only; the root filesystem is
-not affected. The initramfs runs every `modprobe` with that blacklist,
-so `nvidia` lines in `/etc/initramfs-tools/modules` are skipped and the
-script loads `nvidia_drm` in their place, with the options from
-`modprobe.d`.
+- **initramfs-tools:** `/usr/share/initramfs-tools/modules.d/gpu-unlock.conf`.
 - **dracut:** `/usr/lib/dracut/dracut.conf.d/gpu-unlock.conf`.
 
 With initramfs-tools and dracut, the module is built for every installed
@@ -152,14 +187,14 @@ There is no `softdep nvidia pre:` rule: kmod honours only the first
 The module does nothing unless the kernel command line opts in:
 
 ```
-gpu_unlock.targets=all                          # every unbound GA102/GA103/GA104/GA106 card
+gpu_unlock.targets=all                          # every supported unbound card
 gpu_unlock.targets=0000:21:00.0                 # only these cards
 gpu_unlock.targets=0000:21:00.0,0000:22:00.0    # comma-separated
 ```
 
 Addresses are full PCI names as `lspci -D` prints them (hex digits in either
 case), independent of GPU numbering and display role. An entry that is not
-a GA102/GA103/GA104/GA106 card, including `all` mixed with addresses, is logged and ignored.
+a supported card (see [Supported GPUs](#supported-gpus)), including `all` mixed with addresses, is logged and ignored.
 The cards are unlocked concurrently, about a second in all however many
 there are, and each on its own: a card that is already bound or powered
 down is skipped. Bus mastering that the board firmware left on (Supermicro
@@ -171,12 +206,7 @@ The display card works too. Its firmware framebuffer (the boot console and
 Plymouth) keeps running while the unlock's firmware steps run, and is
 removed just before the card's reset, as `nvidia-drm` would do a moment
 later anyway. Its screen is blank from that reset until `nvidia-drm` takes
-over. When `nvidia-drm` is not in the initramfs, that is only after the
-root filesystem is mounted, so a prompt before then, such as a LUKS
-passphrase, is not shown. initramfs-tools adds `nvidia-drm` to the image
-for this. With mkinitcpio, list `nvidia nvidia_modeset nvidia_drm` in
-`MODULES` (the drop-in puts `gpu_unlock` before them). With dracut, the
-prompt stays blank: type the passphrase anyway.
+over.
 
 Loading the module by hand after boot does nothing to a card that `nvidia`
 has bound.
@@ -197,7 +227,7 @@ Check the result with:
 
 ```sh
 journalctl -k -b | grep gpu_unlock
-lspci -nnk -s 0000:21:00.0
+lspci -nnk -s 0000:[ID]:00.0
 ```
 
 To stop unlocking, remove `gpu_unlock.targets=` from the kernel command line;
@@ -208,7 +238,7 @@ If the firmware on a card never stops, the module logs it and keeps the DMA
 buffers that firmware may still use until the next power off. Power off
 before trying again.
 
-The kernel module and local packaging are GPL-2.0-only. The generated payload
+The kernel module and local packaging are GPL-2.0-only. The generated buffer
 derives from the pinned CMP reference; NVIDIA firmware remains under its own
 terms. See `firmware/NOTICE.md` and `licenses/` for attribution and notices.
 
@@ -216,7 +246,9 @@ terms. See `firmware/NOTICE.md` and `licenses/` for attribution and notices.
 
 Help me buy more GPUs <3
 
-[https://buymeacoffee.com/zagitta](https://buymeacoffee.com/zagitta)  
+[Github Sponsor](https://github.com/sponsors/Zagitta)
+
+[https://buymeacoffee.com/zagitta](https://buymeacoffee.com/zagitta) 
 
 ETH: 0xf4eee937937f92038D70B16AbD7736D8a53a1c5c
 

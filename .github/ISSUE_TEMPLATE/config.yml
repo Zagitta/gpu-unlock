@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: It worked on my card
+    url: https://github.com/Zagitta/gpu-unlock/discussions/238
+    about: Share successful unlocks and benchmarks in Discussions, not as issues.
+  - name: Question
+    url: https://github.com/Zagitta/gpu-unlock/discussions/categories/q-a
+    about: Ask how to install or use gpu-unlock.

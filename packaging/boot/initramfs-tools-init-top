@@ -1,0 +1,10 @@
+#!/bin/sh
+# Load gpu_unlock before init-top/udev starts the coldplug, which would
+# load nvidia for the card first; modules.d only loads it after that. It
+# does nothing unless gpu_unlock.targets= is on the kernel command line.
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case $1 in
+prereqs) prereqs; exit 0 ;;
+esac
+modprobe -q gpu_unlock || true

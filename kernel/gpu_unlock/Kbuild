@@ -1,4 +1,4 @@
 # SPDX-License-Identifier: GPL-2.0-only
 obj-m += gpu_unlock.o
 gpu_unlock-y := main.o gfw_eval.o prep_610.o layout_610.o \
-	vbios_610.o unlock_610.o
+	vbios_610.o recipes.o payload.o firmware_610.o falcon.o unlock_610.o

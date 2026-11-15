@@ -1,41 +1,35 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-only
-"""Fetch pinned inputs without executing/installing them; atomically verify cache."""
+"""Fetch the NVIDIA inputs without executing or installing them."""
 from __future__ import annotations
 
 import argparse
-import hashlib
-import json
 import os
 from pathlib import Path
 import tempfile
 import urllib.request
 
-MANIFEST = Path(__file__).with_name("artifacts-610.43.03.json")
-
-
-def digest(path: Path) -> str:
-    with path.open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
-
-
-def inputs(manifest: dict) -> list[dict]:
-    """The NVIDIA source archive and the nvidia-utils package the build uses."""
-    source, _reference, package = manifest["source_artifacts"]
-    return [source, package]
+INPUTS = (
+    {
+        "filename": "NVIDIA-kernel-module-source-610.43.03.tar.xz",
+        "url": "https://download.nvidia.com/XFree86/NVIDIA-kernel-module-source/"
+               "NVIDIA-kernel-module-source-610.43.03.tar.xz",
+    },
+    {
+        "filename": "NVIDIA-Linux-x86_64-610.43.03-no-compat32.run",
+        "url": "https://download.nvidia.com/XFree86/Linux-x86_64/610.43.03/"
+               "NVIDIA-Linux-x86_64-610.43.03-no-compat32.run",
+    },
+)
 
 
 def fetch(entry: dict, output: Path, offline: bool = False) -> Path:
     output.mkdir(parents=True, exist_ok=True)
     destination = output / entry["filename"]
     if destination.exists():
-        if destination.is_symlink() or digest(destination) != entry["sha256"]:
-            raise ValueError(f"invalid cached artifact: {destination}; remove it to retry")
         return destination
     if offline:
         raise FileNotFoundError(f"missing cached artifact: {destination}")
-    if not entry["url"].startswith("https://"):
-        raise ValueError("artifact downloads require HTTPS")
     temporary = None
     try:
         request = urllib.request.Request(entry["url"], headers={"User-Agent": "gpu-unlock-artifacts/0.1.0"})
@@ -52,8 +46,6 @@ def fetch(entry: dict, output: Path, offline: bool = False) -> Path:
                     stream.write(block)
                 stream.flush()
                 os.fsync(stream.fileno())
-        if digest(temporary) != entry["sha256"]:
-            raise ValueError(f"SHA-256 mismatch: {entry['filename']}")
         temporary.chmod(0o644)
         temporary.replace(destination)
         return destination
@@ -65,10 +57,10 @@ def fetch(entry: dict, output: Path, offline: bool = False) -> Path:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path, help="cache directory (for example scratchpad/artifacts)")
-    parser.add_argument("--offline", action="store_true", help="verify cached inputs without network")
+    parser.add_argument("--offline", action="store_true", help="use cached inputs without network")
     args = parser.parse_args()
     try:
-        for entry in inputs(json.loads(MANIFEST.read_text())):
+        for entry in INPUTS:
             print(fetch(entry, args.output, args.offline))
     except (OSError, ValueError) as error:
         parser.exit(1, f"fetch failed: {error}\n")

@@ -1,0 +1,73 @@
+<?xml version='1.0' standalone='yes'?>
+<!-- SPDX-License-Identifier: GPL-2.0-only -->
+<!-- The Unraid workflow fills in the version and publishes this next to the
+     packages it builds for each Unraid kernel. -->
+<!DOCTYPE PLUGIN [
+  <!ENTITY name    "gpu-unlock">
+  <!ENTITY author  "Zagitta">
+  <!ENTITY version "@VERSION@">
+  <!ENTITY repoURL "https://github.com/&author;/&name;">
+  <!ENTITY relURL  "&repoURL;/releases/download/unraid">
+  <!ENTITY plugin  "/boot/config/plugins/&name;">
+]>
+
+<PLUGIN name="&name;" author="&author;" version="&version;" pluginURL="&relURL;/&name;.plg"
+        min="7.3.0" icon="microchip" support="&repoURL;/issues">
+
+<CHANGES>
+###&version;
+- See &repoURL;
+</CHANGES>
+
+<!-- Every boot: install the module for the running kernel and have it run
+     before nvidia, which the Nvidia Driver plugin loads with modprobe. -->
+<FILE Run="/bin/bash">
+<INLINE>
+krel=$(uname -r)
+pkg=&name;-&version;_${krel//-/_}-x86_64-1.txz
+dir=&plugin;/packages
+mkdir -p "$dir"
+# Packages of other versions and kernels.
+find "$dir" -type f ! -name "$pkg" ! -name "$pkg.md5" -delete
+if [ ! -f "$dir/$pkg.md5" ]; then
+  echo "Downloading $pkg"
+  if ! wget -q -O "$dir/$pkg" "&relURL;/$pkg" || ! wget -q -O "$dir/$pkg.md5" "&relURL;/$pkg.md5"; then
+    rm -f "$dir/$pkg" "$dir/$pkg.md5"
+    echo "gpu-unlock: no &version; package for kernel $krel yet, see &repoURL;/issues"
+    exit 1
+  fi
+fi
+if [ "$(md5sum "$dir/$pkg" | cut -d' ' -f1)" != "$(cut -d' ' -f1 "$dir/$pkg.md5")" ]; then
+  rm -f "$dir/$pkg" "$dir/$pkg.md5"
+  echo "gpu-unlock: checksum mismatch for $pkg, install the plugin again"
+  exit 1
+fi
+upgradepkg --install-new "$dir/$pkg"
+depmod -a
+
+# TARGETS is "all" or comma-separated PCI addresses, as for gpu_unlock.targets=.
+[ -f &plugin;/&name;.cfg ] || echo 'TARGETS="all"' > &plugin;/&name;.cfg
+source &plugin;/&name;.cfg
+printf '%s\n' '# Written by the gpu-unlock plugin from &plugin;/&name;.cfg' \
+  'softdep nvidia pre: gpu_unlock' "options gpu_unlock targets=$TARGETS" > /etc/modprobe.d/&name;.conf
+
+# The firmware is generated once and kept on the flash drive.
+ln -sfn &plugin;/firmware /lib/firmware/&name;
+gpu-unlock-firmware || true
+
+if [ -d /sys/module/nvidia ] ; then
+  [ -d /sys/module/gpu_unlock ] || echo "gpu-unlock: nvidia is already loaded, reboot to unlock"
+fi
+</INLINE>
+</FILE>
+
+<FILE Run="/bin/bash" Method="remove">
+<INLINE>
+removepkg &name;
+rm -f /etc/modprobe.d/&name;.conf /lib/firmware/&name;
+rm -rf &plugin;
+echo "gpu-unlock: removed, reboot to drop the unlock"
+</INLINE>
+</FILE>
+
+</PLUGIN>

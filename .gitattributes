@@ -1,4 +1,4 @@
-# `make dist` ships only the source needed to build and test the packages.
+# `make dist` ships only the source needed to build the packages.
 /* export-ignore
 /VERSION -export-ignore
 /Makefile -export-ignore
@@ -7,7 +7,7 @@
 /kernel -export-ignore
 /licenses -export-ignore
 /packaging -export-ignore
-/tests -export-ignore
 *.bin export-ignore
+*.rom export-ignore
 *.cu export-ignore
 /debian -export-ignore

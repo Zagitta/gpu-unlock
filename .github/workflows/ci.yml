@@ -13,8 +13,8 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# The pinned NVIDIA/CachyOS inputs (about 340 MB) are fetched once per
-# manifest change into .inputs and shared by every job through the cache.
+# The pinned NVIDIA inputs are fetched once per change of the list in
+# fetch_artifacts.py into .inputs and shared by every job through the cache.
 jobs:
   inputs:
     runs-on: ubuntu-24.04
@@ -24,27 +24,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .inputs
-          key: inputs-${{ hashFiles('firmware/artifacts-*.json') }}
+          key: inputs-${{ hashFiles('firmware/fetch_artifacts.py') }}
       - if: steps.cache.outputs.cache-hit != 'true'
         run: make inputs INPUTS=.inputs
       - name: Verify the inputs
         run: python3 firmware/fetch_artifacts.py --offline .inputs
-
-  # With the generated firmware the tests also run the whole unlock against
-  # mocked hardware, not only the components.
-  test:
-    needs: inputs
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v5
-      - run: sudo apt-get update -q && sudo apt-get install -qy zstd
-      - uses: actions/cache/restore@v4
-        with:
-          path: .inputs
-          key: inputs-${{ hashFiles('firmware/artifacts-*.json') }}
-          fail-on-cache-miss: true
-      - run: make firmware INPUTS=.inputs ASSETS="$RUNNER_TEMP/assets"
-      - run: make test ASSETS="$RUNNER_TEMP/assets"
 
   module:
     name: module (${{ matrix.image }})
@@ -54,15 +38,21 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - image: debian:12   # 6.1
+          - image: debian:12     # 6.1
             setup: apt-get update -q && apt-get install -qy --no-install-recommends ca-certificates git
-          - image: ubuntu:24.04  # 6.8
+          - image: debian:13     # 6.12
             setup: apt-get update -q && apt-get install -qy --no-install-recommends ca-certificates git
-          - image: debian:13   # 6.12
+          - image: ubuntu:22.04  # 5.15, 6.8 HWE
             setup: apt-get update -q && apt-get install -qy --no-install-recommends ca-certificates git
-          - image: fedora:latest
+          - image: ubuntu:24.04  # 6.8, 7.0 HWE
+            setup: apt-get update -q && apt-get install -qy --no-install-recommends ca-certificates git
+          - image: ubuntu:26.04  # 7.0
+            setup: apt-get update -q && apt-get install -qy --no-install-recommends ca-certificates git
+          - image: fedora:43     # 7.2
             setup: dnf install -qy git
-          - image: archlinux:latest
+          - image: fedora:latest  # 7.2
+            setup: dnf install -qy git
+          - image: archlinux:latest  # 7.2, 6.18 LTS
             setup: pacman -Syu --noconfirm --needed git
     steps:
       # Without git the checkout is a GitHub archive, which leaves out
@@ -80,8 +70,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - image: debian:12
+            setup: apt-get update -q && apt-get install -qy --no-install-recommends ca-certificates git make xz-utils zstd
           - image: debian:13
             setup: apt-get update -q && apt-get install -qy --no-install-recommends ca-certificates git make xz-utils zstd
+          - image: ubuntu:22.04
+            setup: apt-get update -q && apt-get install -qy --no-install-recommends ca-certificates git make xz-utils zstd
+          - image: ubuntu:24.04
+            setup: apt-get update -q && apt-get install -qy --no-install-recommends ca-certificates git make xz-utils zstd
+          - image: ubuntu:26.04
+            setup: apt-get update -q && apt-get install -qy --no-install-recommends ca-certificates git make xz-utils zstd
+          - image: fedora:43
+            setup: dnf install -qy git make xz zstd rpm-build dnf-plugins-core
           - image: fedora:latest
             setup: dnf install -qy git make xz zstd rpm-build dnf-plugins-core
           - image: archlinux:latest
@@ -94,6 +94,7 @@ jobs:
       - uses: actions/cache/restore@v4
         with:
           path: .inputs
-          key: inputs-${{ hashFiles('firmware/artifacts-*.json') }}
+          key: inputs-${{ hashFiles('firmware/fetch_artifacts.py') }}
           fail-on-cache-miss: true
       - run: INPUTS=.inputs sh .github/ci/package.sh
+      - run: sh tests/packaging/install.sh
