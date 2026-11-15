@@ -12,7 +12,7 @@ case "$ID" in
 debian|ubuntu)
 	install="apt-get install -qy --no-install-recommends ./build/deb/*.deb"
 	remove="apt-get purge -qy"
-	boot=/usr/share/initramfs-tools/scripts/init-top/gpu-unlock ;;
+	boot="/usr/share/initramfs-tools/scripts/init-top/gpu-unlock /usr/share/initramfs-tools/hooks/gpu-unlock" ;;
 fedora)
 	install="dnf install -qy build/rpm/RPMS/noarch/*.rpm"
 	remove="dnf remove -qy"
@@ -32,11 +32,11 @@ test -f "$src/main.c"
 test -f "$fw/gsp_ga10x.bin"
 test -f "$fw/booter_load_ga102.bin"
 test -f "$dracut"
-test -f "$boot"
+for f in $boot; do test -f "$f"; done
 
 $remove gpu-unlock-dkms gpu-unlock-firmware
 test ! -e "$src"
 test ! -e "$fw"
 test ! -e "$dracut"
-test ! -e "$boot"
+for f in $boot; do test ! -e "$f"; done
 echo "packages install and remove cleanly"

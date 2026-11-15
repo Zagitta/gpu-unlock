@@ -1,0 +1,21 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+# Put nvidia_drm in the image. On a display card gpu_unlock removes the
+# firmware framebuffer before its reset, and nothing shows again until
+# nvidia-drm loads. From the root filesystem that is too late for anything
+# the initramfs asks on screen, such as a LUKS passphrase. init-top/gpu-unlock
+# runs before udev's coldplug, which then loads nvidia_drm for the card.
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case $1 in
+prereqs) prereqs; exit 0 ;;
+esac
+
+. /usr/share/initramfs-tools/hook-functions
+
+# Leave images alone for kernels without both modules.
+modinfo -k "${version}" gpu_unlock >/dev/null 2>&1 || exit 0
+modinfo -k "${version}" nvidia_drm >/dev/null 2>&1 || exit 0
+
+# nvidia_drm pulls in nvidia_modeset, nvidia and their firmware.
+manual_add_modules nvidia_drm
