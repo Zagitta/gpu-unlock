@@ -31,7 +31,7 @@ DEBS    := $(foreach p,dkms firmware,$(DEBDIR)/gpu-unlock-$(p)_$(VERSION)_all.de
 .PHONY: all dist inputs firmware assets install-dkms install-firmware \
         install-mkinitcpio install-initramfs-tools install-dracut \
         install-licenses arch deb rpm install install-arch install-deb install-rpm \
-        test-module test-packages
+        test-unit test-module test-packages
 
 all:
 
@@ -142,6 +142,21 @@ install-rpm:
 	sudo dnf builddep -y packaging/rpm/gpu-unlock.spec
 	$(MAKE) rpm
 	sudo dnf install -y $(RPMDIR)/RPMS/noarch/gpu-unlock-*-$(VERSION)-*.noarch.rpm
+
+# Host tests of the pure parsers and the recipe table; the asset checks
+# need `make assets`.
+test-unit:
+	$(CC) -Wall -Wextra -Wno-missing-field-initializers -Wno-unused-const-variable \
+		-Werror -std=c11 -Ikernel/gpu_unlock \
+		tests/unit_test.c \
+		kernel/gpu_unlock/gfw_eval.c \
+		kernel/gpu_unlock/layout_610.c \
+		kernel/gpu_unlock/prep_610.c \
+		kernel/gpu_unlock/vbios_610.c \
+		kernel/gpu_unlock/payload.c \
+		kernel/gpu_unlock/recipes.c \
+		-o $(DISTDIR)/unit_test
+	$(DISTDIR)/unit_test $(ASSETS)
 
 # Build the module, or build, install and remove the packages, in a
 # container of each distribution.
