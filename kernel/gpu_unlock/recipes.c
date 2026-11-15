@@ -273,6 +273,15 @@ static const struct gu_booter sec2_ad102 = {
 		.ucode_id = 3,
 	},
 };
+/* This Booter is the tu10x image only, and no TU116 id joins cards[] until its
+ * own material exists. 610.43.03 ships a separate tu11x load image
+ * (g_bindata_kgspGetBinArchiveBooterLoadUcode_TU116: 58880 B, its own 16 B AES
+ * signature and patch location, where tu10x is 59136 B), which no extractor
+ * decodes yet. Measured on a TU116 GTX 1660 SUPER: with the tu10x pair the FWSEC
+ * loader halts and WPR2 comes up at the FRTS page, then the SEC2 Booter stops in
+ * its nonsecure stub (MAILBOX0 0x31) and the first privileged write fails with
+ * -EIO. The chip id is 0x168, so a TU116(id)-style line is all that is missing
+ * once the tu11x image and its payload are derived. */
 static const struct gu_booter sec2_tu102 = {
 	.file = GU_FW_BOOTER_TU102,
 	.launch = GU_SEC2_DIRECT,
