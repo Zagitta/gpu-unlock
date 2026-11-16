@@ -125,6 +125,6 @@ The unlock only speeds up FP16/BF16/TF32 tensor math with FP32
 accumulation. ggml-based backends (llama.cpp, stable-diffusion.cpp,
 trellis2.cpp and similar in LocalAI) often use FP16 accumulation or INT8,
 which already run at full rate. On the test machine (RTX 3060, LocalAI),
-diffusion, flow and audio workloads gained 2–5%; LLM generation and Q4
+diffusion, flow and audio workloads gained 2-5%; LLM generation and Q4
 prefill were unchanged within noise. The main README reports much larger
 gains for PyTorch FP16/BF16 workloads.

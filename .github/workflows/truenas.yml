@@ -1,0 +1,129 @@
+# SPDX-License-Identifier: GPL-2.0-only
+name: TrueNAS
+
+on:
+  push:
+    paths:
+      - kernel/**
+      - firmware/**
+      - licenses/**
+      - Makefile
+      - VERSION
+      - packaging/truenas/**
+      - .github/workflows/truenas.yml
+  pull_request:
+    paths:
+      - kernel/**
+      - firmware/**
+      - licenses/**
+      - Makefile
+      - VERSION
+      - packaging/truenas/**
+      - .github/workflows/truenas.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# A TrueNAS host gives its kernel headers to packaging/truenas/build.sh as a
+# tarball, so the gate is that tarball: it is produced here from Debian 12
+# headers, the distribution TrueNAS's kernel is built with, and the whole
+# bundle is then built and checked. The module source and the firmware
+# pipeline are the real subjects; the TrueNAS kernel version is the variable.
+jobs:
+  headers:
+    name: Debian 12 kernel headers
+    runs-on: ubuntu-24.04
+    container: debian:12
+    steps:
+      # Install git and tar before checkout; the image has neither.
+      - run: apt-get update -q &&
+          apt-get install -qy --no-install-recommends ca-certificates git tar
+      - uses: actions/checkout@v5
+      - run: apt-get install -qy --no-install-recommends linux-headers-amd64
+      - name: Pack self-contained kernel headers
+        run: |
+          set -eu
+          k=$(ls -d /lib/modules/*/build | head -n1)
+          k=${k%/build}; k=${k##*/}
+          echo "kernel: $k"
+          # Debian splits the headers: the flavour tree's Makefile includes the
+          # common tree's by absolute path, which a real host has unpacked and
+          # this container has not. Merge the two, so the tarball is the
+          # self-contained tree a host's /lib/modules/*/build really is.
+          arch=$(realpath "/lib/modules/$k/build")
+          common=${arch%-*}-common
+          test -d "$common" || { echo "no common headers beside $arch" >&2; exit 1; }
+          rm -rf merged && mkdir merged
+          # Dereferenced real files, as the host tarball carries them.
+          cp -aL "$common"/. "$arch"/. merged/
+          # The flavour tree's Makefile is a stub that includes the common
+          # tree's Makefile by absolute path, so the merged tree keeps the
+          # common tree's own; that is what makes the tarball self-contained.
+          cp -aL "$common"/Makefile merged/Makefile
+          ! grep -q '^include /usr/src' merged/Makefile
+          tar -C merged -chzf kernel-headers.tar.gz .
+          tar -tzf kernel-headers.tar.gz | grep -qE '(^|/)Makefile$'
+          tar -tzf kernel-headers.tar.gz |
+            grep -qE '(^|/)include/config/auto\.conf$'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: truenas-headers
+          path: kernel-headers.tar.gz
+          if-no-files-found: error
+
+  bundle:
+    name: build and check the bundle
+    runs-on: ubuntu-24.04
+    needs: headers
+    steps:
+      - uses: actions/checkout@v5
+      # The pinned NVIDIA inputs, from the cache the CI inputs job fills.
+      - uses: actions/cache/restore@v4
+        with:
+          path: .inputs
+          key: inputs-${{ hashFiles('firmware/fetch_artifacts.py') }}
+          fail-on-cache-miss: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: truenas-headers
+          path: /tmp/truenas-host
+      - name: Build the bundle
+        run: |
+          set -eu
+          NV=$(sed -n 's/^NV *:= *//p' Makefile)
+          mkdir -p "packaging/truenas/work/inputs-$NV"
+          cp .inputs/* "packaging/truenas/work/inputs-$NV/"
+          packaging/truenas/build.sh /tmp/truenas-host
+      - name: Check the bundle
+        run: |
+          set -eu
+          NV=$(sed -n 's/^NV *:= *//p' Makefile)
+          archive=$(ls packaging/truenas/out/gpu-unlock-*.tar.gz)
+          dir=${archive%.tar.gz}
+          tar -xzf "$archive" -C packaging/truenas/out
+          base=$(basename "$dir")
+          # build.sh writes the bare version there, extracted from
+          # utsrelease.h, so read it as it is.
+          kver=$(cat packaging/truenas/work/module/KERNEL)
+          test -n "$kver"
+          test "$base" = "gpu-unlock-$kver"
+          cd "packaging/truenas/out/$base"
+          test -f gpu_unlock.ko
+          test -f gpu-unlock-load.sh
+          test "$(modinfo -F vermagic gpu_unlock.ko | cut -d' ' -f1)" = "$kver"
+          modinfo -F firmware gpu_unlock.ko | grep -q 'gpu-unlock/'
+          test "$(find "firmware/gpu-unlock/$NV" -name '*.bin' | wc -l)" -eq \
+            "$(grep -c 'MODULE_FIRMWARE(' ../../../../kernel/gpu_unlock/firmware_610.c)"
+          test -f "firmware/gpu-unlock/$NV/gsp_ga10x.bin"
+          test -f "firmware/gpu-unlock/$NV/booter_load_tu102.bin"
+          test -s NVIDIA-LICENSE
+          grep -q 'kernel compiler' BUILDINFO
+          grep -q 'build compiler' BUILDINFO
+          sha256sum -c SHA256SUMS
+          echo "TrueNAS bundle for $kver: module, loader, $(
+            find "firmware/gpu-unlock/$NV" -name '*.bin' | wc -l) firmware files"
