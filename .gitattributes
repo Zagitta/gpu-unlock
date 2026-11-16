@@ -7,6 +7,7 @@
 /kernel -export-ignore
 /licenses -export-ignore
 /packaging -export-ignore
+/guix -export-ignore
 *.bin export-ignore
 *.rom export-ignore
 *.cu export-ignore
