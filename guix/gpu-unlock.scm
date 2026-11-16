@@ -39,6 +39,9 @@
 (define %gpu-unlock-version "2.0.0")
 (define %gpu-unlock-commit "7eb51bccae0a0b7e599e084d971170e9a1e82d0c")
 
+; The checkout hash is the nar hash of that commit's tree, the same value as
+; `guix hash -x nar -x <checkout>` of a fresh checkout of it. Re-pin it with
+; every ref the port follows; see guix/integration.md.
 (define gpu-unlock-source
   (origin
     (method git-fetch)
@@ -48,7 +51,7 @@
     (file-name (git-file-name "gpu-unlock" %gpu-unlock-version))
     (sha256
      (base32
-      "1m84a37xk2qha65pj8g6zvds6yqm11x0vrv3prb2b46dzbhg62bq"))))
+      "pae7hyh2zwickvv6mptq26qicv52hw764yqxtc2rccf5tt2qatkq"))))
 
 (define nvidia-kernel-source-610.43.03
   (origin

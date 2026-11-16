@@ -68,6 +68,17 @@ operating-system additions:
     sudo guix time-machine -C channels.scm -- \
       system reconfigure -L <repo>/guix path/to/your/config.scm
 
+## Re-pinning a release
+
+`gpu-unlock.scm` pins the source to one commit of this repository, so a
+re-pin is three edits: `%gpu-unlock-version`, `%gpu-unlock-commit`, and the
+origin `sha256`. The origin hash is the nar hash of that commit's checkout,
+so compute it from a fresh checkout of it (`.gitattributes` `export-ignore`
+does not apply here; it only shapes `git archive`):
+
+    git worktree add --detach /tmp/gu v2.0.0
+    guix hash -x nar -x /tmp/gu      # -x nar: hash the tree, not .git
+
 ## Verify after reboot
 
     cat /proc/cmdline                                  # flag present
