@@ -99,12 +99,18 @@ existing options:
 in `/etc/default/grub`, then run `sudo update-grub`.
 - **GRUB (Arch/CachyOS):** same edit, then run
 `sudo grub-mkconfig -o /boot/grub/grub.cfg`.
+- **Proxmox VE (host):** add it inside `GRUB_CMDLINE_LINUX_DEFAULT`
+in `/etc/default/grub`, then run `sudo update-grub && sudo proxmox-boot-tool refresh`.
 - **Fedora/RHEL:** run
 `sudo grubby --update-kernel=ALL --args="gpu_unlock.targets=all"`.
 - **systemd-boot:** append it to the `options` line in your boot entry
 (`bootctl status` shows its location).
 - **UKI / generated entries:** add it to `/etc/kernel/cmdline` and regenerate
 your boot images/entries (e.g. `sudo mkinitcpio -P` for mkinitcpio UKIs).
+- **Limine:** append it to cmdline in `/boot/limine/limine.conf`.
+- **rEFInd:** append it to "Boot using default options" in `/boot/refind_linux.conf`.
+- **Omarchy:** add it inside `KERNEL_CMDLINE[default]` in `/etc/default/limine`,
+then run `sudo limine-update`.
 
 # FAQ
 
@@ -115,6 +121,11 @@ A: No the driver is only fetched to extract firmware this unlock depends on
 - Q: What about Windows?  
 A: I don't run windows and don't plan to maintain it but [https://github.com/impacifist/Windows-GPU-UNLOCK](https://github.com/impacifist/Windows-GPU-UNLOCK) has built a port, YMMV.   
 There are windows installer's floating around but I would recommend being ++**very**++ careful with those.
+- Q: My GPU is passed through to a VM, where do I install this?  
+A: On the hypervisor host, for Ampere and Ada. The module runs from the host initramfs before `nvidia` binds, and on those chips the unlock lives until the card loses power, so every guest that gets the card later is already unlocked and needs nothing at all: no package, no kernel parameter, stock driver as usual. Measured on a Proxmox VE host with RTX 4060 Ti passed through, the guests bench identically with the module on the host and with the module inside the guest.  
+Turing is the exception: `vfio` performs a function-level reset when it assigns the device, and on TU10x that reset clears the speed selectors, so a host-side unlock is erased before the guest boots. Measured on the same host with an RTX 2070 SUPER passed through: the card the host had unlocked benched capped in the guest, and the module installed inside the guest took it from 38.6 to 65.4 TFLOPS FP16.   
+- Q: Can I run it inside the VM instead?  
+A: With PCI passthrough it does work, VFIO exposes everything the module needs (BAR0, FLR, DMA above 4 GiB), at three costs: the guest carries the 108 MB firmware package and builds the module through DKMS, suspend and resume stays a host job (the module re-unlocks there through its PM notifier), and on Ampere and Ada the guest can never reach the stock rate again, because a guest reboot, an FLR and a `vfio-pci` rebind all keep the unlock, so only a host power off restores stock, which is what you want for a stock vs unlocked comparison. Turing is the other way round: an FLR clears its speed selectors, so a card unlocked in the guest comes back capped after a `vfio-pci` rebind, a device reset at VM start, or a guest reboot that resets the device, and installing the module in the guest initramfs is what makes the unlock survive every boot.
 - Q: What about Blackwell (RTX 50)?  
 A: Not supported and unlikely to happen.    
 - Q: Why did Nvidia handicap my GPU?  
