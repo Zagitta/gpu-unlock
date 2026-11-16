@@ -46,7 +46,7 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -qy --no-install-recommends build-essential linux-headers-generic
-          make -C kernel/gpu_unlock KDIR="$(ls -d /usr/src/linux-headers-* | sort -V | tail -1)"
+          make -C kernel/gpu_unlock KDIR="$(printf '%s\n' /usr/src/linux-headers-* | sort -V | tail -1)"
       - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           category: /language:${{ matrix.language }}
@@ -103,11 +103,11 @@ jobs:
           sudo apt-get install -qy --no-install-recommends build-essential sparse linux-headers-generic
       - name: sparse
         run: make -C kernel/gpu_unlock clean &&
-          make -C kernel/gpu_unlock KDIR="$(ls -d /usr/src/linux-headers-* | sort -V | tail -1)"
+          make -C kernel/gpu_unlock KDIR="$(printf '%s\n' /usr/src/linux-headers-* | sort -V | tail -1)"
           C=2 modules > sparse.log 2>&1 || true
       - name: gcc -fanalyzer
         run: make -C kernel/gpu_unlock clean &&
-          make -C kernel/gpu_unlock KDIR="$(ls -d /usr/src/linux-headers-* | sort -V | tail -1)"
+          make -C kernel/gpu_unlock KDIR="$(printf '%s\n' /usr/src/linux-headers-* | sort -V | tail -1)"
           KCFLAGS=-fanalyzer modules > analyzer.log 2>&1 || true
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
