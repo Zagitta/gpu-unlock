@@ -23,9 +23,8 @@ dracut drop-in that puts both in the initramfs.
 
 %install
 install -Dm644 %{_sourcedir}/gpu_unlock.ko %{buildroot}/usr/lib/modules/%{kver}/extra/gpu_unlock.ko
-for f in booter_load_ga102.bin gsp_ga10x.bin gsp_boot_ga102.bin gsp_boot_desc_ga102.bin v67-ga102-%{nv}.bin; do
-    install -Dm644 %{_sourcedir}/assets/$f %{buildroot}/usr/lib/firmware/gpu-unlock/%{nv}/$f
-done
+# All of them: the installer copies the whole generated asset set.
+install -Dm644 -t %{buildroot}/usr/lib/firmware/gpu-unlock/%{nv} %{_sourcedir}/assets/*.bin
 # dracut reads drop-ins in name order and loads force_drivers in that order.
 # Images such as Bazzite force nvidia from 99-nvidia.conf; a later name would
 # load gpu_unlock after nvidia has bound the card (unlock failed -16).

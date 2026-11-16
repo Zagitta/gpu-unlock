@@ -123,9 +123,9 @@ REL=$(date +%Y%m%d%H%M)
 rm -rf "$OUT/src" "$OUT/rpms" "$OUT/gpu-unlock-local.spec"
 mkdir -p "$OUT/src/assets" "$OUT/src/licenses" "$OUT/rpms"
 cp "$KO" packaging/boot/dracut.conf "$OUT/src/"
-for f in booter_load_ga102.bin gsp_ga10x.bin gsp_boot_ga102.bin gsp_boot_desc_ga102.bin "v67-ga102-$NV.bin"; do
-    cp "$CACHE/assets/$f" "$OUT/src/assets/"
-done
+# Every generated asset, not a per-family list: a Turing or Ada card on an
+# Atomic image needs its own Booter, and a stale name here fails the copy.
+cp "$CACHE"/assets/*.bin "$OUT/src/assets/"
 cp licenses/*.txt "$CACHE/assets/NVIDIA-LICENSE" firmware/NOTICE.md "$OUT/src/licenses/"
 cp packaging/atomic/gpu-unlock-local.spec "$OUT/"
 
@@ -216,7 +216,7 @@ sudo ostree --repo=/ostree/repo cat "$COMMIT" "/usr/lib/modules/$KVER/initramfs.
 lsinitrd "$OUT/initramfs.img" 2>/dev/null > "$OUT/initramfs.txt" || :
 rm -f "$OUT/initramfs.img"
 grep -q 'extra/gpu_unlock.ko' "$OUT/initramfs.txt" || die "gpu_unlock.ko is not in the pending initramfs; it would load after nvidia."
-grep -q "firmware/gpu-unlock/$NV/v67-ga102-$NV.bin" "$OUT/initramfs.txt" || die "the gpu-unlock firmware is not in the pending initramfs."
+grep -q "firmware/gpu-unlock/$NV/gsp_ga10x.bin" "$OUT/initramfs.txt" || die "the gpu-unlock firmware is not in the pending initramfs."
 PRE=$(sed -n 's/^ *rd\.driver\.pre=//p' "$OUT/initramfs.txt")
 [ "$(echo "$PRE" | grep -m1 -xE 'gpu_unlock|nvidia')" = gpu_unlock ] ||
     die "the initramfs loads nvidia before gpu_unlock; the unlock would fail with -EBUSY. Order: $(echo $PRE)"
