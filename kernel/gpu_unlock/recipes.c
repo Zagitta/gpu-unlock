@@ -223,7 +223,7 @@ static const struct gu_reg_write ga100_plm[] = {
 
 /* Host side writes for speed unlocks */
 static const struct gu_reg_write selectors[] = {
-	{ GU_FEAT_SS0_OFFSET, GU_SS0_UNLOCK }, 
+	{ GU_FEAT_SS0_OFFSET, GU_SS0_UNLOCK },
 	{ GU_FEAT_SS1_OFFSET, GU_SS1_UNLOCK },
 };
 
@@ -233,11 +233,11 @@ static const struct gu_booter sec2_ga100 = {
 	.payload = &ga100_v67,
 	.expect = {
 		.image_size = 60160,
-		.num_sigs = 1, 
+		.num_sigs = 1,
 		.sig_bytes = 384,
-		.os_data_off = 34560, 
-		.os_data_size = 25600, 
-		.app_code_size = 34304, 
+		.os_data_off = 34560,
+		.os_data_size = 25600,
+		.app_code_size = 34304,
 		.patch_loc = 35072,
 		.ucode_id = 3,
 	},
@@ -427,8 +427,8 @@ static const struct gu_card cards[] = {
 	GA104(0x24a4), GA104(0x24ac), GA104(0x24ad), GA104(0x24af),
 	GA104(0x24bf), GA104(0x24c0), GA104(0x24c7), GA104(0x24c8),
 	GA104(0x24c9), GA104(0x24dc), GA104(0x24dd), GA104(0x24df),
-	GA104(0x24e0), 
-		
+	GA104(0x24e0),
+
 	GA106(0x2501), GA106(0x2503), GA106(0x2504), GA106(0x2505),
 	GA106(0x2507), GA106(0x2508), GA106(0x2509), GA106(0x252f),
 	GA106(0x2544),
