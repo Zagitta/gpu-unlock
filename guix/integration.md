@@ -6,10 +6,10 @@ at the rootfs stage, which avoids touching the initrd at all.
 
 ## Design
 
-- `(make-gpu-unlock-module linux)` — the out-of-tree module, built with
+- `(make-gpu-unlock-module linux)` - the out-of-tree module, built with
   `linux-module-build-system` against the EXACT kernel package the
   system config uses (`linux` from nonguix, not `linux-libre`).
-- `gpu-unlock-firmware` — the 16 asset files the module requests from
+- `gpu-unlock-firmware` - the 16 asset files the module requests from
   `lib/firmware/gpu-unlock/610.43.03/`, extracted from NVIDIA
   610.43.03 by the repo's `firmware/extract_gsp.py` +
   `firmware/extract_boot_assets.py` (needs `zstd` in PATH).
@@ -43,7 +43,7 @@ operating-system additions:
                        "gpu_unlock.targets=all"
                        %default-kernel-arguments))
 
-    ;; the boot-time one-shot is too long to inline here — see
+    ;; the boot-time one-shot is too long to inline here - see
     ;; config-example.scm in this directory for the complete,
     ;; boot-proven service (holder sweep, udev freeze, retry logic,
     ;; modprobe -d).  Its four essential steps:
@@ -77,18 +77,18 @@ operating-system additions:
 
 Rollback: remove `gpu_unlock.targets=all` and the nvidia blacklist
 entries from `kernel-arguments` (or boot an older generation from the
-GRUB menu — gpu_unlock without the cmdline flag is inert).
+GRUB menu - gpu_unlock without the cmdline flag is inert).
 
 ## channels.scm (pin the pair that built your current system)
 
     Read /run/current-system/provenance to see the commit pair your
     running system was built from, and pin both.  Pinned commits need
     explicit introductions (see "channel authentication" in the Guix
-    manual) — a seeded or older cache otherwise fails with
+    manual) - a seeded or older cache otherwise fails with
     "channel 'guix' lacks 'introduction' field but '.guix-authorizations'
     found".  If a box's outbound git path is broken, pre-seed
     ~/.cache/guix/checkouts/ from a box that resolved the identical
-    spec (slot names are not derivable from the URL — seed every
+    spec (slot names are not derivable from the URL - seed every
     observed name).
 
 ## Bench (post-reboot)

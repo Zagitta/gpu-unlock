@@ -59,7 +59,7 @@
     (file-name "NVIDIA-kernel-module-source-610.43.03.tar.xz")
     (sha256
      (base32
-      "1p61kzz2vb770cia95c6z6d4xq738qx2fqsd24vdqgm2qwiqj4by"))))
+      "pyiysi6hui7nynqrjvrsoosg4pqe5gxzq2k2iiqd46wc37u7yhoa"))))
 
 (define nvidia-installer-610.43.03
   (origin
@@ -70,7 +70,7 @@
     (file-name "NVIDIA-Linux-x86_64-610.43.03-no-compat32.run")
     (sha256
      (base32
-      "141gzqc47s05a95xkxs5r7ikdln495bnakypsclxz9ihnwflb170"))))
+      "4ccekhnxgctn6kot25hwkv2jytjdny6jix35ss2saxueggh6f6ia"))))
 
 (define %fw-dir "lib/firmware/gpu-unlock/610.43.03")
 
@@ -120,8 +120,9 @@
     (description
      "GSP and booter assets extracted from NVIDIA 610.43.03 that the
 gpu_unlock out-of-tree kernel module requests from
-@file{@%fw-dir}.  Built by the repository's extract scripts.")
-    (license (list license:gpl2 license:cc0)))) ; see firmware/NOTICE.md
+@file{/lib/firmware/gpu-unlock/610.43.03}.  Built by the repository's
+extract scripts.")
+    (license (list license:gpl2 license:expat)))) ; see firmware/NOTICE.md
 
 (define* (make-gpu-unlock-module linux)
   "Return the gpu_unlock out-of-tree kernel module package built against

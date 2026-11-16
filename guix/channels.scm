@@ -1,6 +1,6 @@
 ;; Pinned channels used to build the gpu-unlock system.
 ;; latest-generation commits (2026-11-05): guix 4f5d464, nonguix 2b2e100,
-;; kernel 7.2.15 — module/firmware/system already built for these.
+;; kernel 7.2.15 - module/firmware/system already built for these.
 ;; nonguix introduction required for commit authentication.
 (list (channel
         (name 'guix)

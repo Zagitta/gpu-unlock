@@ -1,4 +1,4 @@
-;; gpu-unlock on Guix System — fragment to add to an existing
+;; gpu-unlock on Guix System - fragment to add to an existing
 ;; operating-system declaration (nonguix, classic API).
 ;;
 ;; Do NOT use this file verbatim as a full config: keep your own
@@ -15,7 +15,7 @@
 ;;   (use-modules (gpu-unlock))   ; guix system ... -L <repo>/guix
 ;;
 ;; Rollback: remove "gpu_unlock.targets=all" and the nvidia blacklist
-;; entries from kernel-arguments, or boot the previous generation —
+;; entries from kernel-arguments, or boot the previous generation -
 ;; gpu_unlock without the cmdline flag is inert.
 
 (use-modules (gnu)
@@ -39,10 +39,14 @@
   ;; Boot-time unlock one-shot.  Runs after file-systems, before the
   ;; NVIDIA driver binds.  Any shepherd service that opens CUDA (or the
   ;; nvidia power-cap service) must require gpu-unlock-load so it starts
-  ;; only after the unlock completes — otherwise it holds the driver and
+  ;; only after the unlock completes - otherwise it holds the driver and
   ;; the unlock silently no-ops.
-                   (simple-service 'gpu-unlock-load
-                                 shepherd-root-service-type
+  ;; A shepherd service is a field of the services list, never of the
+  ;; operating-system record itself, so the one-shot enters through
+  ;; (services (cons* ... %base-services)).
+  (services (cons*
+             (simple-service 'gpu-unlock-load
+                             shepherd-root-service-type
                                  (list (shepherd-service
                                         (provision '(gpu-unlock-load))
                                         (requirement '(file-systems))
@@ -105,11 +109,6 @@
                                                     ;; omni grab the device before this
                                                     ;; service runs) - the FLR needs a free
                                                     ;; device and held uvm blocks the eject.
-                                                    ;; Kill anything holding /dev/nvidia*
-                                                    ;; open (boot-managed GPU daemons like
-                                                    ;; omni grab the device before this
-                                                    ;; service runs) - the FLR needs a free
-                                                    ;; device and held uvm blocks the eject.
                                                     ;; Pure-shell scan (scandir/filter-map
                                                     ;; are unbound in this compiled module).
                                                     (let ((shk (lambda (c)
@@ -163,6 +162,7 @@
                                                          (say "nvidia_drm FAILED\n"))
                                                      #t)))
                                         (stop #~(const #f)))))
+             %base-services))
   ;; (service nvidia-service-type) stays as before.
   ;; (simple-service 'nvidia-pm-set ...): add gpu-unlock-load to its
   ;; requirement list, e.g. (requirement '(user-processes gpu-unlock-load)).
