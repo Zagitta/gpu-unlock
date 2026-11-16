@@ -25,7 +25,9 @@ jobs:
     outputs:
       releases: ${{ steps.find.outputs.releases }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
       - id: find
         env:
           GH_TOKEN: ${{ github.token }}
@@ -41,7 +43,9 @@ jobs:
       matrix:
         unraid: ${{ fromJSON(needs.discover.outputs.releases) }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
       - name: Unraid kernel source
         run: |
           sudo apt-get update -q
@@ -62,7 +66,7 @@ jobs:
             sh packaging/unraid/build.sh "$1" dist
             chown -R "$2" dist' sh "$src" "$(id -u):$(id -g)"
           echo "${{ matrix.unraid.version }} $(cat VERSION)" > 'dist/${{ matrix.unraid.version }}.built'
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: unraid-${{ matrix.unraid.version }}
           path: dist
@@ -75,9 +79,11 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
       - if: needs.discover.outputs.releases != '[]'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: unraid-*
           merge-multiple: true

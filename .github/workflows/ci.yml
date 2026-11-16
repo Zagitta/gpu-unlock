@@ -19,9 +19,11 @@ jobs:
   inputs:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
       - id: cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: .inputs
           key: inputs-${{ hashFiles('firmware/fetch_artifacts.py') }}
@@ -58,7 +60,9 @@ jobs:
       # Without git the checkout is a GitHub archive, which leaves out
       # everything .gitattributes marks export-ignore, .github included.
       - run: ${{ matrix.setup }}
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
       - run: sh .github/ci/module.sh
 
   package:
@@ -90,8 +94,10 @@ jobs:
       # git before the checkout, as above and so make dist and makepkg can
       # build HEAD; zstd before the cache restore, which needs it.
       - run: ${{ matrix.setup }}
-      - uses: actions/checkout@v5
-      - uses: actions/cache/restore@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: .inputs
           key: inputs-${{ hashFiles('firmware/fetch_artifacts.py') }}
