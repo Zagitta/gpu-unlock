@@ -7,13 +7,22 @@
 
 #include "gfw_eval.h"
 
+/*
+ * A powered-down engine reads all ones, and a Falcon PRI error reads back the
+ * 0xbadfxxxx family. Both carry the bits the tests below look for, so treat
+ * them as inaccessible here as the callers' own inaccessible() helper does.
+ */
+static bool inaccessible(u32 value)
+{
+	return value == (u32)~0U || (value & 0xffff0000u) == 0xbadf0000u;
+}
+
 int gpu_unlock_gfw_assess(const struct gpu_unlock_gfw_sample *sample)
 {
 	if (!sample || !sample->config_ok)
 		return -ENODEV;
-	/* All-ones satisfies the bit tests below and is not a live device. */
-	if (sample->plm == (u32)~0U || sample->boot == (u32)~0U ||
-	    sample->cpuctl == (u32)~0U)
+	if (inaccessible(sample->plm) || inaccessible(sample->boot) ||
+	    inaccessible(sample->cpuctl))
 		return -ENODEV;
 	if (!(sample->cpuctl & GU_GFW_CPUCTL_HALTED))
 		return -EAGAIN;
