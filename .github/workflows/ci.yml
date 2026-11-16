@@ -98,3 +98,37 @@ jobs:
           fail-on-cache-miss: true
       - run: INPUTS=.inputs sh .github/ci/package.sh
       - run: sh tests/packaging/install.sh
+
+  # The packager-free path is the installer for distros with no native
+  # packager: DKMS builds the module, and the firmware, the licenses and the
+  # initramfs drop-ins are placed by hand. Its gate is a real install and a
+  # real removal, in a container with a kernel to build for, asserting the
+  # image really carries the module and its firmware.
+  local-install:
+    name: packager-free install
+    runs-on: ubuntu-24.04
+    container: debian:13
+    needs: inputs
+    steps:
+      # git before the checkout, as in the module and package jobs: without it
+      # the checkout is a GitHub archive, which leaves out tests/. zstd before
+      # the cache restore, which needs it.
+      - run: apt-get update -q &&
+          apt-get install -qy --no-install-recommends ca-certificates git tar zstd
+      - uses: actions/checkout@v5
+        with:
+          # The test clones this checkout to install a clean copy, and a
+          # shallow clone cannot be cloned --shared.
+          fetch-depth: 0
+      # The cache is a saving, not a requirement: inside a container job it is
+      # not always readable, and the test installs python3 and fetches what is
+      # missing here itself.
+      - uses: actions/cache/restore@v4
+        with:
+          path: .inputs
+          key: inputs-${{ hashFiles('firmware/fetch_artifacts.py') }}
+      - name: Install, verify, remove
+        env:
+          SRC: ${{ github.workspace }}
+          INPUTS: ${{ github.workspace }}/.inputs
+        run: sh tests/docker/test-local-install.sh '${{ github.sha }}'
