@@ -48,7 +48,7 @@ jobs:
       - name: Pack self-contained kernel headers
         run: |
           set -eu
-          k=$(ls -d /lib/modules/*/build | head -n1)
+          k=$(printf '%s\n' /lib/modules/*/build | head -n1)
           k=${k%/build}; k=${k##*/}
           echo "kernel: $k"
           # Debian splits the headers: the flavour tree's Makefile includes the
@@ -65,7 +65,12 @@ jobs:
           # tree's Makefile by absolute path, so the merged tree keeps the
           # common tree's own; that is what makes the tarball self-contained.
           cp -aL "$common"/Makefile merged/Makefile
-          ! grep -q '^include /usr/src' merged/Makefile
+          # A pipeline beginning with ! is exempt from errexit, so assert with a
+          # test that exits non-zero itself.
+          if grep -q '^include /usr/src' merged/Makefile; then
+            echo "merged Makefile still includes the common tree" >&2
+            exit 1
+          fi
           tar -C merged -chzf kernel-headers.tar.gz .
           tar -tzf kernel-headers.tar.gz | grep -qE '(^|/)Makefile$'
           tar -tzf kernel-headers.tar.gz |
