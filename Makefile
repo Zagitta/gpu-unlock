@@ -146,6 +146,7 @@ install-rpm:
 # Host tests of the pure parsers and the recipe table; the asset checks
 # need `make assets`.
 test-unit:
+	mkdir -p $(DISTDIR)
 	$(CC) -Wall -Wextra -Wno-missing-field-initializers -Wno-unused-const-variable \
 		-Werror -std=c11 -Ikernel/gpu_unlock \
 		tests/unit_test.c \
