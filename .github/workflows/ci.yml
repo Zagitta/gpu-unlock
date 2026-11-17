@@ -91,6 +91,9 @@ jobs:
       # build HEAD; zstd before the cache restore, which needs it.
       - run: ${{ matrix.setup }}
       - uses: actions/checkout@v5
+        with:
+          # makepkg's shared clone cannot use a shallow source mirror.
+          fetch-depth: 0
       - uses: actions/cache/restore@v4
         with:
           path: .inputs

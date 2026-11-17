@@ -23,6 +23,8 @@ arch)
 	chown -R builder "$PWD" "$INPUTS"
 	su builder -c "git config --global --add safe.directory '$PWD' &&
 		cd packaging/arch && SRCDEST='$INPUTS' makepkg -f --noconfirm"
+	# The install checks clone the checkout as the original user.
+	chown -R "$(id -u):$(id -g)" "$PWD" "$INPUTS"
 	ls packaging/arch/*.pkg.tar.zst ;;
 *)
 	echo "unknown distribution: $ID" >&2

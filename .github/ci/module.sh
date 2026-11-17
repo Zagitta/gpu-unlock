@@ -7,10 +7,10 @@ set -eu
 case "$ID" in
 debian)
 	apt-get update -q
-	apt-get install -qy --no-install-recommends make gcc linux-headers-amd64 ;;
+	apt-get install -qy --no-install-recommends make gcc libc6-dev linux-headers-amd64 ;;
 ubuntu)
 	apt-get update -q
-	apt-get install -qy --no-install-recommends make gcc linux-headers-generic
+	apt-get install -qy --no-install-recommends make gcc libc6-dev linux-headers-generic
 	# The hardware enablement kernel, where the release has one.
 	apt-get install -qy --no-install-recommends "linux-headers-generic-hwe-$VERSION_ID" || :
 	# Its headers do not pull in the gcc it was built with.
