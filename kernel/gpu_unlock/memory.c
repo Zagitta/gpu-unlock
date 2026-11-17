@@ -232,9 +232,7 @@ int gu_memory_finalize(struct device *dev, void __iomem *bar, resource_size_t le
 		if (ret)
 			return ret;
 		published_bytes = (u64)published << 20;
-		/* Firmware may reserve framebuffer space below the encoded range.
-		 * Preserve its smaller usable size, but never advertise capacity
-		 * beyond the decoded range. The common minimum check follows. */
+		/* Match the boot layout's GFW size, bounded by the decoded range. */
 		if (!published_bytes || published_bytes > result.usable_bytes) {
 			dev_err(dev, "gpu_unlock: invalid GFW memory size range=%#x decoded_usable=%#llx GFW_MiB=%#x\n",
 				range, (unsigned long long)result.usable_bytes, published);
