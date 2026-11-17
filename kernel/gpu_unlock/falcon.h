@@ -13,7 +13,9 @@ struct gu_falcon_io {
 	int (*read)(void *context, u32 offset, u32 *value);
 	void (*write)(void *context, u32 offset, u32 value);
 };
-struct gu_falcon_engine { u32 base, fbif, falcon2; };
+/* dmactl_scrub: post-reset scrubbing is reported by DMACTL bits 1:2
+ * (Turing and GA100) rather than HWCFG2 bit 12 (GA10x and AD10x). */
+struct gu_falcon_engine { u32 base, fbif, falcon2; bool dmactl_scrub; };
 
 /* Reset for every operation, including validation failures. Available on error.
  * started records a submitted start; halted records a successful halt wait.
@@ -53,8 +55,9 @@ int gu_falcon_poll(const struct gu_falcon_io *io, u32 offset, u32 mask, u32 expe
 		   unsigned int budget_us, bool timeout_is_failure, u32 *last);
 int gu_falcon_dma(const struct gu_falcon_io *io, u32 base, u32 dest, u32 mem_off,
 		  dma_addr_t src, u32 size, u32 cmd);
-int gu_falcon_engine_reset(const struct gu_falcon_io *io, u32 base, const char *phase,
-			   u32 *hwcfg, struct gu_falcon_evidence *evidence);
+int gu_falcon_engine_reset(const struct gu_falcon_io *io, const struct gu_falcon_engine *eng,
+			   const char *phase, u32 *hwcfg,
+			   struct gu_falcon_evidence *evidence);
 int gu_falcon_reset(const struct gu_falcon_io *io, const struct gu_falcon_engine *eng,
 		    struct gu_falcon_evidence *evidence);
 int gu_falcon_hs(const struct gu_falcon_io *io, const struct gu_falcon_engine *eng,

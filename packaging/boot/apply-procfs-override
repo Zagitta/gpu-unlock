@@ -1,0 +1,63 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+set -eu
+[ "$#" = 1 ] || exit 2
+bdf=$1
+case "$bdf" in
+    *[!0123456789abcdefABCDEF:.]*|'') exit 2 ;;
+esac
+case "$bdf" in ????:??:??.[0-7]) ;; *) exit 2 ;; esac
+directory=/sys/kernel/gpu_unlock/overrides
+registry=/proc/driver/nvidia/gpus/$bdf/registry
+params=/proc/driver/nvidia/params
+
+message() {
+    # Kernel-launched helpers may have no stderr descriptor.
+    printf 'gpu_unlock: %s: %s\n' "$bdf" "$*" >&2 || true
+    if [ -w /dev/kmsg ]; then
+        printf '<4>gpu_unlock: %s: %s\n' "$bdf" "$*" > /dev/kmsg || true
+    fi
+}
+
+found=0
+for record in "$directory/$bdf.bin" "$directory/$bdf"-[0-9A-F][0-9A-F].bin; do
+    [ ! -r "$record" ] || found=1
+done
+[ "$found" = 1 ] || exit 0
+if [ ! -r "$params" ] || [ ! -r "$registry" ] ||
+   [ ! -r /proc/driver/nvidia/registry ]; then
+    message 'NVIDIA per-GPU registry unavailable; VBIOS overrides not applied'
+    exit 1
+fi
+# A native file mapping or existing ROM keys are user-owned configuration.
+if grep -Eq '^RegistryBinaryFilePerDevice:[[:space:]]*"[^"]+' "$params" ||
+   grep -iq 'romOverride' "$registry" /proc/driver/nvidia/registry; then
+    message 'using the existing NVIDIA ROM override configuration'
+    exit 0
+fi
+# Older drivers predate this option and already defer initialization.
+# Never change the user's policy or write after probe-time adapter startup.
+if grep -q '^GpuInitOnProbe:' "$params" &&
+   ! grep -Eq '^GpuInitOnProbe:[[:space:]]*0[[:space:]]*$' "$params"; then
+    message 'legacy VBIOS overrides require options nvidia NVreg_GpuInitOnProbe=0; rebuild the initramfs if NVIDIA loads there, then reboot'
+    # Recognized by the kernel caller even when early /dev/kmsg is absent.
+    exit 10
+fi
+# NVIDIA buffers the raw binary value and commits it on final close.
+# A successful write alone does not prove that RM accepted the key.
+for record in "$directory/$bdf.bin" "$directory/$bdf"-[0-9A-F][0-9A-F].bin; do
+    [ -r "$record" ] || continue
+    index=00
+    if [ "$record" != "$directory/$bdf.bin" ]; then
+        index=${record##*/}
+        index=${index#"$bdf"-}
+        index=${index%.bin}
+    fi
+    key=romOverride$index
+    { printf '%s=' "$key"; cat "$record"; } > "$registry"
+    if ! grep -q "$key" "$registry"; then
+        message "NVIDIA did not register $key"
+        exit 1
+    fi
+done
+message 'generated VBIOS overrides registered through per-GPU procfs'

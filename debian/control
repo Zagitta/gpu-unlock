@@ -8,7 +8,7 @@ Rules-Requires-Root: no
 
 Package: gpu-unlock-dkms
 Architecture: all
-Depends: ${misc:Depends}, dkms,
+Depends: ${misc:Depends}, dkms, kmod,
  gpu-unlock-firmware (= ${source:Version})
 Description: RTX 3090 BF16 unlock before the NVIDIA driver loads
  DKMS source for gpu_unlock, loaded ahead of nvidia on every boot. It does

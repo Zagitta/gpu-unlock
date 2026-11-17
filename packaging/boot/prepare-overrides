@@ -1,0 +1,57 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+set -eu
+driver_mode() {
+    if ! parameters=$(modinfo "$@" -p nvidia 2>/dev/null); then
+        echo unknown
+    elif printf '%s\n' "$parameters" | grep -q '^NVreg_RegistryBinaryFilePerDevice:'; then
+        echo native
+    else
+        echo procfs
+    fi
+}
+case ${1:-} in
+    --driver-supported) [ "$(driver_mode -k "$2")" = native ]; exit $? ;;
+    --driver-mode) driver_mode -k "$2"; exit 0 ;;
+esac
+config=/run/modprobe.d/gpu-unlock-ecc.conf
+legacy=/sys/module/gpu_unlock/parameters/legacy_overrides
+if [ -d /sys/module/nvidia ] && [ ! -d /sys/module/gpu_unlock ]; then
+    echo 'gpu-unlock: NVIDIA is already loaded; reboot with gpu-unlock loaded first' >&2
+    exit 1
+fi
+rm -f "$config"
+modprobe -q gpu_unlock
+[ ! -w "$legacy" ] || printf '0\n' > "$legacy"
+[ -s /sys/kernel/gpu_unlock/nvidia.conf ] || exit 0
+# An explicit mapping is a complete user override; do not replace its entries.
+if modprobe -c | grep -Eq '^options[[:space:]]+nvidia[[:space:]].*NVreg_RegistryBinaryFilePerDevice='; then
+    echo 'gpu-unlock: using the configured NVIDIA binary registry mapping' >&2
+    exit 0
+fi
+# NVIDIA may load only after switching to the real root. In that case its
+# module is absent here; the image builder records support for this kernel.
+mode=$(driver_mode)
+if [ "$mode" = unknown ]; then
+    if [ -r /usr/lib/gpu-unlock/driver-mode ]; then
+        read -r mode < /usr/lib/gpu-unlock/driver-mode
+    elif [ -f /usr/lib/gpu-unlock/registry-binary-supported ]; then
+        mode=native
+    fi
+fi
+case "$mode" in
+    native) ;;
+    procfs)
+        printf '1\n' > "$legacy"
+        echo 'gpu-unlock: using per-GPU procfs for legacy NVIDIA VBIOS overrides; NVreg_GpuInitOnProbe must be 0 if the driver exposes it' >&2
+        exit 0 ;;
+    *)
+        # Unraid may install NVIDIA only after our plugin runs. Stage the
+        # native mapping now and check the actual driver at binding time.
+        # Linux ignores unknown module parameters on older NVIDIA modules;
+        # the procfs helper then requires their deferred initialization.
+        printf '1\n' > "$legacy"
+        echo 'gpu-unlock: NVIDIA metadata unavailable; staging native files with guarded procfs delivery when the driver binds' >&2 ;;
+esac
+mkdir -p /run/modprobe.d
+ln -s /sys/kernel/gpu_unlock/nvidia.conf "$config"

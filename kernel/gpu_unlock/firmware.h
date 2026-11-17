@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-#ifndef GPU_UNLOCK_FIRMWARE_610_H
-#define GPU_UNLOCK_FIRMWARE_610_H
+#ifndef GPU_UNLOCK_FIRMWARE_H
+#define GPU_UNLOCK_FIRMWARE_H
 
-#include "prep_610.h"
+#include "prep.h"
 #include "device.h"
 #include "recipes.h"
 
@@ -10,7 +10,7 @@ struct firmware;
 
 /* Immutable after preparation, including decoded metadata. Owns gsp and boot.
  * key is the family file set this slot was claimed for. */
-struct gpu_unlock_610_firmware {
+struct gpu_unlock_firmware {
 	const struct gu_fw_desc *key;
 	const struct firmware *gsp, *boot;
 	struct gpu_unlock_span image_span, sig_span;
@@ -21,7 +21,7 @@ struct gpu_unlock_610_firmware {
 };
 
 /* A loaded Booter image. Families that share a gu_booter share one slot. */
-struct gpu_unlock_610_booter {
+struct gpu_unlock_booter {
 	const struct gu_booter *key;
 	const struct firmware *fw;
 	struct gpu_unlock_booter_hdr hdr;
@@ -32,15 +32,15 @@ struct gpu_unlock_610_booter {
 
 /* One coordination round. Bundles and Booters are interned by descriptor
  * pointer, so families that share a Booter load it once. */
-struct gpu_unlock_610_shared {
-	struct gpu_unlock_610_firmware bundle[GU_SHARED_BUNDLES];
-	struct gpu_unlock_610_booter booter[GU_SHARED_BOOTERS];
+struct gpu_unlock_shared {
+	struct gpu_unlock_firmware bundle[GU_SHARED_BUNDLES];
+	struct gpu_unlock_booter booter[GU_SHARED_BOOTERS];
 	const struct firmware *loader;
 	const char *loader_name;
 };
 
-static inline const struct gpu_unlock_610_firmware *
-gpu_unlock_610_bundle_find(const struct gpu_unlock_610_shared *shared,
+static inline const struct gpu_unlock_firmware *
+gpu_unlock_bundle_find(const struct gpu_unlock_shared *shared,
 			   const struct gu_fw_desc *fw)
 {
 	unsigned int i;
@@ -53,8 +53,8 @@ gpu_unlock_610_bundle_find(const struct gpu_unlock_610_shared *shared,
 	return NULL;
 }
 
-static inline const struct gpu_unlock_610_booter *
-gpu_unlock_610_booter_find(const struct gpu_unlock_610_shared *shared,
+static inline const struct gpu_unlock_booter *
+gpu_unlock_booter_find(const struct gpu_unlock_shared *shared,
 			   const struct gu_booter *desc)
 {
 	unsigned int i;
@@ -70,7 +70,7 @@ gpu_unlock_610_booter_find(const struct gpu_unlock_610_shared *shared,
 /* Serial preparation only; no workers may run until all calls have returned.
  * Cache failures for this round without invalidating another family's assets.
  * A fresh round starts after release_shared(), including on resume. */
-int gpu_unlock_610_load_shared(const struct gu_device *device, struct gpu_unlock_610_shared *shared);
-void gpu_unlock_610_release_shared(struct gpu_unlock_610_shared *shared);
+int gpu_unlock_load_shared(const struct gu_device *device, struct gpu_unlock_shared *shared);
+void gpu_unlock_release_shared(struct gpu_unlock_shared *shared);
 
 #endif

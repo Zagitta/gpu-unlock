@@ -1,16 +1,24 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-2.0-only
-# Commit the working tree, uncommitted and untracked files included, on top
-# of HEAD and print its id. The checkout, index and branches are untouched;
-# refs/gpu-unlock/snapshot keeps the commit reachable for makepkg's clone.
-# A clean tree prints HEAD. The same tree and HEAD give the same id.
+# Snapshot only the explicit release source list. The checkout, index and
+# branches stay untouched; the snapshot ref keeps the build commit reachable.
 set -eu
 cd "$(dirname "$0")/.."
-index=$(mktemp)
-trap 'rm -f "$index"' EXIT
-cp "$(git rev-parse --git-path index)" "$index"
-# .claude holds Claude Code session state and worktrees, not source.
-GIT_INDEX_FILE=$index git add -A -- . ':!.claude'
+index_dir=$(mktemp -d)
+trap 'rm -rf "$index_dir"' EXIT
+index=$index_dir/index
+while IFS= read -r path; do
+    case "$path" in
+        ''|/*|..|../*|*/../*|*/..|.git|.git/*)
+            echo "Invalid release source path: $path" >&2; exit 1 ;;
+    esac
+    if [ ! -f "$path" ] || [ -L "$path" ]; then
+        echo "Release source must be a regular file: $path" >&2
+        exit 1
+    fi
+done < packaging/source-files
+GIT_INDEX_FILE=$index git read-tree --empty
+GIT_INDEX_FILE=$index git --literal-pathspecs add --pathspec-from-file=packaging/source-files
 tree=$(GIT_INDEX_FILE=$index git write-tree)
 head=$(git rev-parse HEAD)
 if [ "$tree" = "$(git rev-parse "HEAD^{tree}")" ]; then

@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-#ifndef GPU_UNLOCK_LAYOUT_610_H
-#define GPU_UNLOCK_LAYOUT_610_H
+#ifndef GPU_UNLOCK_LAYOUT_H
+#define GPU_UNLOCK_LAYOUT_H
 
 #ifdef __KERNEL__
 #include <linux/types.h>

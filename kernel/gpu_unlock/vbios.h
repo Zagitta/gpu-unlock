@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-#ifndef GPU_UNLOCK_VBIOS_610_H
-#define GPU_UNLOCK_VBIOS_610_H
+#ifndef GPU_UNLOCK_VBIOS_H
+#define GPU_UNLOCK_VBIOS_H
 
 #ifdef __KERNEL__
 #include <linux/types.h>
@@ -36,6 +36,13 @@ struct gpu_unlock_fwsec {
 };
 
 int gpu_unlock_vbios_fwsec(const u8 *rom, size_t length, struct gpu_unlock_fwsec *out);
+/* Version-guarded single-byte SKU override, relative to the PCI image.
+ * -EALREADY means the original VBIOS already advertises ECC. */
+int gpu_unlock_vbios_ecc_override(const u8 *rom, size_t length, u8 record[11]);
+/* Add GA100 P8 with the requested idle floors, plus its owning-image checksum.
+ * Factory P0 and an existing P8 are preserved (-EALREADY). */
+int gpu_unlock_vbios_p8_overrides(const u8 *rom, size_t length, u16 minimum_mhz,
+				 u8 record[75], u8 checksum[11]);
 int gpu_unlock_fwsec_patch_frts(u8 *image, const struct gpu_unlock_fwsec *fw,
 				u64 frts_offset);
 int gpu_unlock_fwsec_sig_offset(u32 versions, u32 fuse_version, u32 sig_size,

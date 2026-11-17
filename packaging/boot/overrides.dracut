@@ -1,0 +1,25 @@
+#!/bin/bash
+# SPDX-License-Identifier: GPL-2.0-only
+check() { return 0; }
+depends() { return 0; }
+installkernel() { instmods gpu_unlock; }
+# initdir is supplied by dracut.
+# shellcheck disable=SC2154
+install() {
+    inst_multiple sh modprobe modinfo mkdir ln rm grep cat
+    inst_simple /usr/lib/gpu-unlock/prepare-overrides
+    inst_simple /usr/lib/gpu-unlock/apply-procfs-override
+    inst_simple /usr/lib/modprobe.d/gpu-unlock.conf
+    /usr/lib/gpu-unlock/prepare-overrides --driver-mode "$kernel" > "$initdir/usr/lib/gpu-unlock/driver-mode"
+    mkdir -p "$initdir/usr/lib/firmware/nvidia"
+    ln -s /sys/kernel/gpu_unlock/overrides "$initdir/usr/lib/firmware/nvidia/gpu-unlock"
+    if dracut_module_included systemd; then
+        inst_simple /usr/lib/systemd/system/gpu-unlock-overrides.service
+        mkdir -p "$initdir/usr/lib/systemd/system/sysinit.target.wants"
+        ln -s ../gpu-unlock-overrides.service "$initdir/usr/lib/systemd/system/sysinit.target.wants/gpu-unlock-overrides.service"
+    else
+        # Dracut sources only *.sh hooks. Run the helper separately so its
+        # exits and shell options cannot change dracut's init process.
+        inst_hook cmdline 00 "$moddir/prepare.sh"
+    fi
+}

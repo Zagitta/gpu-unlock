@@ -56,7 +56,9 @@ ln -sfn &plugin;/firmware /lib/firmware/&name;
 gpu-unlock-firmware || true
 
 if [ -d /sys/module/nvidia ] ; then
-  [ -d /sys/module/gpu_unlock ] || echo "gpu-unlock: nvidia is already loaded, reboot to unlock"
+  echo "gpu-unlock: nvidia is already loaded, reboot to prepare unlocks and ECC overrides"
+else
+  /usr/lib/gpu-unlock/prepare-overrides
 fi
 </INLINE>
 </FILE>
@@ -64,6 +66,7 @@ fi
 <FILE Run="/bin/bash" Method="remove">
 <INLINE>
 removepkg &name;
+rm -f /run/modprobe.d/gpu-unlock-ecc.conf
 rm -f /etc/modprobe.d/&name;.conf /lib/firmware/&name;
 rm -rf &plugin;
 echo "gpu-unlock: removed, reboot to drop the unlock"

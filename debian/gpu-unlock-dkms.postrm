@@ -3,6 +3,10 @@ set -e
 
 #DEBHELPER#
 
+if [ "$1" = remove ] || [ "$1" = purge ]; then
+	rm -f /run/modprobe.d/gpu-unlock-ecc.conf
+fi
+
 # Drop gpu_unlock from every initramfs now that the module and the
 # initramfs-tools drop-in are gone.
 if [ "$1" = remove ] && command -v update-initramfs >/dev/null; then

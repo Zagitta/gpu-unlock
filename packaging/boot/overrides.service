@@ -1,0 +1,9 @@
+[Unit]
+Description=Prepare gpu-unlock VBIOS overrides before NVIDIA loads
+DefaultDependencies=no
+Before=systemd-modules-load.service systemd-udevd.service dracut-cmdline.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/gpu-unlock/prepare-overrides
+RemainAfterExit=yes

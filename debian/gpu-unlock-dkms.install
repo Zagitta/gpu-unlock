@@ -2,3 +2,7 @@ usr/src
 usr/share/initramfs-tools
 usr/lib/dracut
 usr/share/doc/gpu-unlock
+usr/lib/gpu-unlock
+usr/lib/modprobe.d/gpu-unlock.conf
+usr/lib/systemd
+usr/lib/firmware/nvidia/gpu-unlock

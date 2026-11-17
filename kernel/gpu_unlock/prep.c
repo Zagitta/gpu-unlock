@@ -9,7 +9,7 @@
 #include <string.h>
 #endif
 
-#include "prep_610.h"
+#include "prep.h"
 
 u32 gpu_unlock_fuse_version(u32 raw)
 {

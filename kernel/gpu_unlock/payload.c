@@ -41,7 +41,6 @@ int gu_payload_check(const struct gu_payload *payload)
 int gu_payload_build(const struct gu_payload *payload, u8 *image,
 		     const struct gu_reg_write *writes, size_t count)
 {
-	u32 offset;
 	size_t i;
 	int ret;
 
@@ -52,8 +51,8 @@ int gu_payload_build(const struct gu_payload *payload, u8 *image,
 		return ret;
 	if (count > payload->writes || (count && !writes))
 		return GU_DIAG(-EINVAL);
-	for (offset = 0; offset < payload->size; offset += 4)
-		put_word(image, offset, payload->fill);
+	/* Every other word stays zero: image comes from a zeroed coherent
+	 * allocation, and a rebuild only rewrites these same offsets. */
 	for (i = 0; i < payload->word_count; i++)
 		put_word(image, payload->words[i].offset, payload->words[i].value);
 	for (i = 0; i < count; i++) {

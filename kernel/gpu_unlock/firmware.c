@@ -6,7 +6,7 @@
 #include <linux/slab.h>
 
 #include "diagnostic.h"
-#include "firmware_610.h"
+#include "firmware.h"
 #include "recipes.h"
 
 #define BOOTER_MAGIC 0x314c5442u
@@ -73,14 +73,14 @@ static int validate_booter(const struct firmware *fw, struct gpu_unlock_booter_h
 	return 0;
 }
 
-static void release_bundle(struct gpu_unlock_610_firmware *assets)
+static void release_bundle(struct gpu_unlock_firmware *assets)
 {
 	release_firmware(assets->gsp);
 	release_firmware(assets->boot);
 	memset(assets, 0, sizeof(*assets));
 }
 
-static int prepare_family(struct pci_dev *pdev, struct gpu_unlock_610_firmware *assets,
+static int prepare_family(struct pci_dev *pdev, struct gpu_unlock_firmware *assets,
 			  const struct gu_fw_desc *load)
 {
 	const struct firmware *desc = NULL;
@@ -122,13 +122,13 @@ static int prepare_family(struct pci_dev *pdev, struct gpu_unlock_610_firmware *
 	return ret;
 }
 
-static struct gpu_unlock_610_firmware *
-claim_bundle(struct gpu_unlock_610_shared *shared, const struct gu_fw_desc *fw)
+static struct gpu_unlock_firmware *
+claim_bundle(struct gpu_unlock_shared *shared, const struct gu_fw_desc *fw)
 {
-	struct gpu_unlock_610_firmware *slot;
+	struct gpu_unlock_firmware *slot;
 	unsigned int i;
 
-	slot = (struct gpu_unlock_610_firmware *)gpu_unlock_610_bundle_find(shared, fw);
+	slot = (struct gpu_unlock_firmware *)gpu_unlock_bundle_find(shared, fw);
 	if (slot)
 		return slot;
 	for (i = 0; i < GU_SHARED_BUNDLES; i++) {
@@ -140,16 +140,16 @@ claim_bundle(struct gpu_unlock_610_shared *shared, const struct gu_fw_desc *fw)
 	return NULL;
 }
 
-static int ensure_booter(struct pci_dev *pdev, struct gpu_unlock_610_shared *shared,
+static int ensure_booter(struct pci_dev *pdev, struct gpu_unlock_shared *shared,
 			 const struct gu_booter *desc)
 {
-	struct gpu_unlock_610_booter *slot = NULL;
+	struct gpu_unlock_booter *slot = NULL;
 	const struct firmware *fw = NULL;
 	struct gpu_unlock_booter_hdr hdr;
 	unsigned int i;
 	int ret;
 
-	if (gpu_unlock_610_booter_find(shared, desc))
+	if (gpu_unlock_booter_find(shared, desc))
 		return 0;
 	for (i = 0; i < GU_SHARED_BOOTERS; i++) {
 		if (!shared->booter[i].key) {
@@ -174,7 +174,7 @@ static int ensure_booter(struct pci_dev *pdev, struct gpu_unlock_610_shared *sha
 	return 0;
 }
 
-static int ensure_loader(struct pci_dev *pdev, struct gpu_unlock_610_shared *shared,
+static int ensure_loader(struct pci_dev *pdev, struct gpu_unlock_shared *shared,
 			 const char *name)
 {
 	const struct firmware *loader = NULL;
@@ -197,12 +197,12 @@ static int ensure_loader(struct pci_dev *pdev, struct gpu_unlock_610_shared *sha
 	return 0;
 }
 
-int gpu_unlock_610_load_shared(const struct gu_device *device, struct gpu_unlock_610_shared *shared)
+int gpu_unlock_load_shared(const struct gu_device *device, struct gpu_unlock_shared *shared)
 {
 	struct pci_dev *pdev;
 	const struct gu_family *family;
 	const struct gu_fw_desc *load;
-	struct gpu_unlock_610_firmware *assets;
+	struct gpu_unlock_firmware *assets;
 	int ret;
 
 	if (!device->recipe || !device->recipe->family || !device->recipe->family->fw ||
@@ -236,7 +236,7 @@ out:
 	return ret;
 }
 
-void gpu_unlock_610_release_shared(struct gpu_unlock_610_shared *shared)
+void gpu_unlock_release_shared(struct gpu_unlock_shared *shared)
 {
 	unsigned int i;
 

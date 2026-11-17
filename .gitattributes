@@ -3,6 +3,7 @@
 /VERSION -export-ignore
 /Makefile -export-ignore
 /README.md -export-ignore
+/tools -export-ignore
 /firmware -export-ignore
 /kernel -export-ignore
 /licenses -export-ignore

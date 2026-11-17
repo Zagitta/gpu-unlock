@@ -6,7 +6,7 @@
 #include <errno.h>
 #endif
 
-#include "layout_610.h"
+#include "layout.h"
 
 static int align_down(u64 value, u64 align, u64 *out)
 {

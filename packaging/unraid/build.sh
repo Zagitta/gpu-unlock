@@ -54,6 +54,11 @@ done
 pkg=$work/pkg
 share=$pkg/usr/local/share/gpu-unlock
 install -Dm644 "$ko" "$pkg/lib/modules/$krel/extra/gpu_unlock.ko"
+install -Dm755 packaging/boot/prepare-overrides "$pkg/usr/lib/gpu-unlock/prepare-overrides"
+install -Dm755 packaging/boot/apply-procfs-override "$pkg/usr/lib/gpu-unlock/apply-procfs-override"
+install -Dm644 packaging/boot/modprobe.conf "$pkg/usr/lib/modprobe.d/gpu-unlock.conf"
+mkdir -p "$pkg/lib/firmware/nvidia"
+ln -s /sys/kernel/gpu_unlock/overrides "$pkg/lib/firmware/nvidia/gpu-unlock"
 install -Dm644 -t "$share" firmware/fetch_artifacts.py firmware/extract_gsp.py \
 	firmware/extract_boot_assets.py firmware/NOTICE.md licenses/*.txt
 mkdir -p "$pkg/usr/local/sbin"

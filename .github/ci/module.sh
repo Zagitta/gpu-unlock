@@ -24,6 +24,7 @@ arch)
 	echo "unknown distribution: $ID" >&2
 	exit 1 ;;
 esac
+sh tests/pm/runtime.sh
 # The same headers can show up under more than one of these paths.
 built=
 for kdir in /usr/src/linux-headers-*-amd64 /usr/src/linux-headers-*-generic \

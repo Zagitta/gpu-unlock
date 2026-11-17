@@ -1,0 +1,24 @@
+#!/usr/bin/bash
+# SPDX-License-Identifier: GPL-2.0-only
+build() {
+    local binary
+    add_module gpu_unlock
+    add_file /usr/lib/gpu-unlock/prepare-overrides
+    add_file /usr/lib/gpu-unlock/apply-procfs-override
+    add_file /usr/lib/modprobe.d/gpu-unlock.conf
+    /usr/lib/gpu-unlock/prepare-overrides --driver-mode "$KERNELVERSION" |
+        add_file - /usr/lib/gpu-unlock/driver-mode 644
+    for binary in sh modprobe modinfo mkdir ln rm grep cat; do
+        add_binary "$binary"
+    done
+    add_symlink /usr/lib/firmware/nvidia/gpu-unlock /sys/kernel/gpu_unlock/overrides
+    if [[ " ${HOOKS[*]} " == *' systemd '* ]]; then
+        add_file /usr/lib/systemd/system/gpu-unlock-overrides.service
+        add_symlink /usr/lib/systemd/system/sysinit.target.wants/gpu-unlock-overrides.service ../gpu-unlock-overrides.service
+    else
+        add_runscript
+    fi
+}
+help() {
+    echo 'Prepare card-specific ECC VBIOS overrides before module loading.'
+}

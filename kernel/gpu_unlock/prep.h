@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-#ifndef GPU_UNLOCK_PREP_610_H
-#define GPU_UNLOCK_PREP_610_H
+#ifndef GPU_UNLOCK_PREP_H
+#define GPU_UNLOCK_PREP_H
 
 #ifdef __KERNEL__
 #include <linux/types.h>
@@ -15,7 +15,7 @@ typedef uint32_t u32;
 typedef uint64_t u64;
 #endif
 
-#include "layout_610.h"
+#include "layout.h"
 
 #define GU_WPR_META_SIZE 256u
 #define GU_WPR_META_MAGIC 0xdc3aae21371a60b3ull

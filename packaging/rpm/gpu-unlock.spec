@@ -1,7 +1,7 @@
 %global nv 610.43.03
 
 Name: gpu-unlock
-Version: 2.0.0
+Version: 3.0.0
 Release: 1%{?dist}
 Summary: RTX 3090 BF16 unlock before the NVIDIA driver loads
 License: GPL-2.0-only
@@ -24,6 +24,7 @@ NVIDIA driver binds, opted in on the kernel command line.
 %package dkms
 Summary: RTX 3090 BF16 unlock kernel source
 Requires: dkms
+Requires: kmod
 Requires(post): dkms
 Requires(preun): dkms
 Requires: gpu-unlock-firmware = %{version}-%{release}
@@ -59,6 +60,12 @@ make DESTDIR=%{buildroot} ASSETS="$PWD/assets" \
 %doc %{_docdir}/gpu-unlock
 %{_usrsrc}/gpu-unlock-%{version}
 %{_prefix}/lib/dracut/dracut.conf.d/gpu-unlock.conf
+%{_prefix}/lib/dracut/modules.d/91gpu-unlock-overrides
+%{_prefix}/lib/gpu-unlock
+%{_prefix}/lib/modprobe.d/gpu-unlock.conf
+%{_prefix}/lib/systemd/system/gpu-unlock-overrides.service
+%{_prefix}/lib/systemd/system/sysinit.target.wants/gpu-unlock-overrides.service
+%{_prefix}/lib/firmware/nvidia/gpu-unlock
 
 %files firmware
 %license %{_defaultlicensedir}/gpu-unlock-firmware
@@ -107,6 +114,7 @@ fi
 
 %postun dkms
 if [ "$1" -eq 0 ]; then
+    rm -f /run/modprobe.d/gpu-unlock-ecc.conf
     # A kernel package's weak-modules run can still have linked another
     # kernel's build into its weak-updates; such a link now dangles and
     # makes dracut fail for that kernel.

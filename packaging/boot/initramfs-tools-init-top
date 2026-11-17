@@ -7,4 +7,4 @@ prereqs() { echo "$PREREQ"; }
 case $1 in
 prereqs) prereqs; exit 0 ;;
 esac
-modprobe -q gpu_unlock || true
+/usr/lib/gpu-unlock/prepare-overrides || true

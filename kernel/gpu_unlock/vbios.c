@@ -10,11 +10,13 @@
 #include <linux/string.h>
 #else
 #include <errno.h>
+#include <stdbool.h>
 #include <string.h>
 #endif
-#include "vbios_610.h"
+#include "vbios.h"
 
-/* FWSEC application selected for the VBIOS request. */
+/* Production selects 0x85. The integration build selects the debug app
+ * 0x45; this is a compile-time seam, never a runtime knob. */
 #ifndef GPU_UNLOCK_FWSEC_APP
 #define GPU_UNLOCK_FWSEC_APP 0x85
 #endif
@@ -221,14 +223,9 @@ static int descriptor(const u8 *rom, size_t length, u64 off,
 	return 0;
 }
 
-int gpu_unlock_vbios_fwsec(const u8 *rom, size_t length, struct gpu_unlock_fwsec *out)
+static int pci_image(const u8 *rom, size_t length, u32 *offset)
 {
-	u32 bit, adjust, image = 0;
-	int ret;
-
-	if (!rom || !out || length > 1024 * 1024)
-		return GU_DIAG(-EINVAL);
-	memset(out, 0, sizeof(*out));
+	u32 image = 0;
 
 	/* The GPU exposes the complete VBIOS container through the PROM
 	 * window.  NVIDIA's kgspExtractVbiosFromRom_TU102 walks the IFR
@@ -240,11 +237,12 @@ int gpu_unlock_vbios_fwsec(const u8 *rom, size_t length, struct gpu_unlock_fwsec
 			return GU_DIAG(-EOPNOTSUPP);
 		{
 			u32 total = r32(rom + 8) & 0xfffffu;
-			u32 flash, dir;
+			u32 flash;
+			u64 dir;
 			if (range(length, total, 4))
 				return GU_DIAG(-EINVAL);
 			flash = r32(rom + total);
-			dir = flash + 0x1000u;
+			dir = (u64)flash + 0x1000u;
 			if (range(length, dir, 12) || r32(rom + dir) != 0x44524652u)
 				return GU_DIAG(-EINVAL);
 			image = r32(rom + dir + 8);
@@ -253,9 +251,25 @@ int gpu_unlock_vbios_fwsec(const u8 *rom, size_t length, struct gpu_unlock_fwsec
 		    r16(rom + image) != 0xaa55u)
 			return GU_DIAG(-EINVAL);
 		GU_NOTE("ROM image: container NVGI version 3 image=%#x\n", image);
-		rom += image;
-		length -= image;
 	}
+	*offset = image;
+	return 0;
+}
+
+int gpu_unlock_vbios_fwsec(const u8 *rom, size_t length, struct gpu_unlock_fwsec *out)
+{
+	u32 bit, adjust, image = 0;
+	int ret;
+
+	if (!rom || !out || length > 1024 * 1024)
+		return GU_DIAG(-EINVAL);
+	memset(out, 0, sizeof(*out));
+
+	ret = pci_image(rom, length, &image);
+	if (ret)
+		return GU_DIAG(ret);
+	rom += image;
+	length -= image;
 
 	ret = expansion(rom, length, &adjust);
 	if (ret)
@@ -315,6 +329,217 @@ int gpu_unlock_vbios_fwsec(const u8 *rom, size_t length, struct gpu_unlock_fwsec
 		}
 	}
 	return GU_DIAG(-ENOENT);
+}
+
+struct override_image {
+	const u8 *rom;
+	size_t length;
+	u32 adjust, token;
+	u8 version[5];
+};
+
+static int override_image(const u8 *rom, size_t length, u8 kind, u32 minimum,
+			  struct override_image *out)
+{
+	u32 image, adjust, pcir, bit, legacy, bios = 0, data = 0;
+	bool found = false;
+	int ret;
+
+	if (!rom || length > 1024 * 1024)
+		return -EINVAL;
+	ret = pci_image(rom, length, &image);
+	if (ret)
+		return ret;
+	rom += image;
+	length -= image;
+	ret = expansion(rom, length, &adjust);
+	if (ret || range(length, 0, 0x1a))
+		return ret ? ret : -EINVAL;
+	pcir = r16(rom + 0x18);
+	if (range(length, pcir, 0x16) || r16(rom) != 0xaa55 ||
+	    r32(rom + pcir) != 0x52494350 || r16(rom + pcir + 4) != 0x10de ||
+	    rom[pcir + 0x14] != 0)
+		return -EOPNOTSUPP;
+	/* BIT is in the legacy image; extended tables can live in NPDS images. */
+	if (!r16(rom + pcir + 0x10) ||
+	    range(length, 0, (size_t)r16(rom + pcir + 0x10) * 512))
+		return -EINVAL;
+	legacy = (u32)r16(rom + pcir + 0x10) * 512;
+	for (bit = 0; bit + 12 <= legacy; bit++) {
+		u32 header, stride, count, sum = 0, i, b = 0, in = 0;
+
+		if (r16(rom + bit) != 0xb8ff || r32(rom + bit + 2) != 0x00544942)
+			continue;
+		header = rom[bit + 8];
+		stride = rom[bit + 9];
+		count = rom[bit + 10];
+		if (r16(rom + bit + 6) != 0x100 || header < 12 ||
+		    (stride != 6 && stride != 8) || range(legacy, bit, header) ||
+		    range(legacy, (u64)bit + header, (u64)count * stride))
+			return -EBADMSG;
+		for (i = 0; i < header; i++)
+			sum += rom[bit + i];
+		if (sum & 0xff)
+			return -EBADMSG;
+		for (i = 0; i < count; i++) {
+			const u8 *token = rom + bit + header + i * stride;
+			u32 ptr = stride == 8 ? r32(token + 4) : r16(token + 4);
+
+			if (token[0] != 'B' && token[0] != kind)
+				continue;
+			if (token[1] != 2 || range(legacy, ptr, r16(token + 2)) || !ptr)
+				return -EOPNOTSUPP;
+			if (token[0] == 'B') {
+				if (b || r16(token + 2) < 5)
+					return -EBADMSG;
+				b = ptr;
+			} else {
+				if (in || r16(token + 2) < minimum)
+					return -EBADMSG;
+				in = ptr;
+			}
+		}
+		if (!b || !in || found)
+			return -EBADMSG;
+		bios = b;
+		data = in;
+		found = true;
+	}
+	if (!found)
+		return -ENOENT;
+	/* Zero is a wildcard in NVIDIA's version guards; never emit one. */
+	if (!r32(rom + bios) || !rom[bios + 4])
+		return -EOPNOTSUPP;
+	*out = (struct override_image) {
+		.rom = rom, .length = length, .adjust = adjust, .token = data,
+		.version = { rom[bios + 3], rom[bios + 2], rom[bios + 1], rom[bios], rom[bios + 4] },
+	};
+	return 0;
+}
+
+static void override_record(const struct override_image *image, u32 offset,
+			    const u8 *data, u8 size, u8 *record)
+{
+	memcpy(record, image->version, sizeof(image->version));
+	w32(record + 5, offset);
+	record[9] = size;
+	memcpy(record + 10, data, size);
+}
+
+int gpu_unlock_vbios_ecc_override(const u8 *rom, size_t length, u8 record[11])
+{
+	struct override_image image;
+	u8 value;
+	int ret;
+
+	if (!record)
+		return -EINVAL;
+	ret = override_image(rom, length, 'i', 0x44, &image);
+	if (ret)
+		return ret;
+	value = image.rom[image.token + 0x43];
+	if (value & 1)
+		return -EALREADY;
+	value |= 1;
+	override_record(&image, image.token + 0x43, &value, 1, record);
+	return 0;
+}
+
+/* Find the PCI/NPDS image owning the entire edit, including its checksum.
+ * Extended images are 512-byte aligned relative to the legacy image. */
+static int override_checksum(const struct override_image *image, u32 offset,
+			      const u8 *data, u8 size, u8 record[11])
+{
+	const u8 *rom = image->rom;
+	u32 pos, pcir, bytes, sum, i;
+	u8 checksum;
+
+	for (pos = 0; pos <= offset; pos += 512) {
+		if (range(image->length, pos, 0x1a) || !rom_signature(r16(rom + pos)))
+			continue;
+		pcir = pos + r16(rom + pos + 0x18);
+		if (range(image->length, pcir, 0x16) || !data_signature(r32(rom + pcir)))
+			continue;
+		bytes = (u32)r16(rom + pcir + 0x10) * 512;
+		if (!bytes || range(image->length, pos, bytes) || offset < pos ||
+		    range(bytes - 1, offset - pos, size))
+			continue;
+		sum = 0;
+		for (i = 0; i < bytes; i++)
+			sum += rom[pos + i];
+		if (sum & 0xff)
+			return -EBADMSG;
+		for (i = 0; i < size; i++)
+			sum += data[i] - rom[offset + i];
+		checksum = rom[pos + bytes - 1] - sum;
+		override_record(image, pos + bytes - 1, &checksum, 1, record);
+		return 0;
+	}
+	return -EINVAL;
+}
+
+int gpu_unlock_vbios_p8_overrides(const u8 *rom, size_t length, u16 minimum_mhz,
+				 u8 record[75], u8 checksum[11])
+{
+	static const u8 domains[] = { 0, 1, 3, 5, 9 }; /* GPC, XBAR, SYS, NVD, HOST */
+	struct override_image image;
+	const u8 *table;
+	u32 offset, entry, p0 = 0, empty = 0, i;
+	u8 row[65];
+	int ret;
+
+	if (!record || !checksum || !minimum_mhz || minimum_mhz > 0x3fff)
+		return -EINVAL;
+	ret = override_image(rom, length, 'P', 4, &image);
+	if (ret)
+		return ret;
+	if (r32(image.rom + image.token) > ~(u32)0 - image.adjust)
+		return -EINVAL;
+	offset = image.adjust + r32(image.rom + image.token);
+	if (!offset || range(image.length, offset, 10))
+		return -EINVAL;
+	table = image.rom + offset;
+	/* Only the inspected GA100 performance 0x60 layout is supported. */
+	if (table[0] != 0x60 || table[1] != 10 || table[2] != 5 ||
+	    !table[3] || table[4] != 6 || table[5] != 10 ||
+	    range(image.length, offset + 10, (u32)table[3] * sizeof(row)))
+		return -EOPNOTSUPP;
+	for (i = 0; i < table[3]; i++) {
+		entry = offset + 10 + i * sizeof(row);
+		if (image.rom[entry] == 7)
+			return -EALREADY; /* Keep a factory P8 intact. */
+		if (image.rom[entry] == 0xff && !empty)
+			empty = entry;
+		if (image.rom[entry] == 15) {
+			if (p0)
+				return -EBADMSG;
+			p0 = entry;
+		}
+	}
+	/* RM's idle limit uses insertion level zero, so do not put P8 after
+	 * an existing state or reorder the factory entries. */
+	if (!p0 || empty != offset + 10 || (memcmp(image.rom + p0, "\x0f\x08\x03\x00\x00", 5) &&
+	    memcmp(image.rom + p0, "\x0f\x08\x03\xff\x00", 5)))
+		return -EOPNOTSUPP;
+	memcpy(row, image.rom + p0, sizeof(row));
+	/* Reuse the tested P0 power/link policies as well as its clock tuples. */
+	row[0] = 7;
+	/* Put the requested minimum fields in P8. Voltage policy and the
+	 * HBM tuple stay intact; the original P0 row is never edited. */
+	for (i = 0; i < sizeof(domains); i++) {
+		u8 *tuple = row + 5 + domains[i] * 6;
+		u32 limits = r32(tuple + 2), minimum = limits & 0x3fff;
+
+		if (!minimum)
+			return -EOPNOTSUPP;
+		if (minimum > minimum_mhz)
+			w32(tuple + 2, (limits & ~0x3fffu) | minimum_mhz);
+	}
+	ret = override_checksum(&image, empty, row, sizeof(row), checksum);
+	if (ret)
+		return ret;
+	override_record(&image, empty, row, sizeof(row), record);
+	return 0;
 }
 
 int gpu_unlock_fwsec_sig_offset(u32 versions, u32 fuse_version, u32 sig_size, u32 *offset)

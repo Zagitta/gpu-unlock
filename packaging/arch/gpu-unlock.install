@@ -8,3 +8,7 @@ post_install() {
 ==> See /usr/share/doc/gpu-unlock/README.md.
 EOF
 }
+
+post_remove() {
+  rm -f /run/modprobe.d/gpu-unlock-ecc.conf
+}

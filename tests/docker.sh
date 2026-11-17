@@ -15,6 +15,7 @@ if [ "$job" = package ]; then
 	mounts="-v $(realpath "$INPUTS"):/inputs:ro"
 fi
 commit=$(packaging/snapshot.sh)
+gitdir=$(git rev-parse --path-format=absolute --git-common-dir)
 [ $# -gt 0 ] || set -- debian:12 debian:13 ubuntu:22.04 ubuntu:24.04 \
 	ubuntu:26.04 fedora:43 fedora:latest archlinux:latest
 
@@ -32,7 +33,7 @@ arch)
 	pacman -Syu --noconfirm --needed base-devel git zstd ;;
 esac
 git config --global --add safe.directory "*"
-git clone -q --shared /src /work
+git clone -q --shared /git /work
 cd /work
 git checkout -q "$1"
 case "$2" in
@@ -49,7 +50,7 @@ failed=
 for image; do
 	echo "==> $image"
 	# shellcheck disable=SC2086
-	docker run --rm -v "$PWD:/src:ro" $mounts "$image" \
+	docker run --rm -v "$gitdir:/git:ro" $mounts "$image" \
 		sh -euc "$script" sh "$commit" "$job" || failed="$failed $image"
 done
 [ -z "$failed" ] || { echo "failed:$failed" >&2; exit 1; }

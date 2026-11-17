@@ -1,3 +1,11 @@
+gpu-unlock (3.0.0) UNRELEASED; urgency=medium
+
+  * Add CMP 170HX compute, PCIe Gen2 and BAR1 support.
+  * Report VRAM temperatures and restore unlocks during device resume.
+  * Restrict release snapshots and DKMS sources to an explicit file list.
+
+ -- Zagitta <zetlon+github@gmail.com>  Tue, 10 Nov 2026 03:13:52 +0000
+
 gpu-unlock (2.0.0) UNRELEASED; urgency=medium
 
   * Add Turing and Ada Lovelace support.

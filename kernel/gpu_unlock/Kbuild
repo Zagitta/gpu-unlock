@@ -1,4 +1,11 @@
 # SPDX-License-Identifier: GPL-2.0-only
 obj-m += gpu_unlock.o
-gpu_unlock-y := main.o gfw_eval.o prep_610.o layout_610.o \
-	vbios_610.o recipes.o payload.o firmware_610.o falcon.o unlock_610.o
+gpu_unlock-y := main.o gfw_eval.o prep.o layout.o \
+	vbios.o recipes.o payload.o firmware.o falcon.o unlock.o fuses.o \
+	host.o pcie.o vram.o inforom.o ecc.o memory.o vpr.o pm.o hbm.o hbm_work.o overrides.o
+# Stable kernels also backport the extra pci_resize_resource argument.
+ccflags-y += $(if $(shell grep -s 'int exclude_bars' $(srctree)/include/linux/pci.h),-DGU_RESIZE_EXCLUDE_BARS)
+# Probe APIs that distribution kernels backport independently of their version.
+ccflags-y += $(if $(shell grep -A 1 'pm_runtime_get_if_active' $(srctree)/include/linux/pm_runtime.h | grep 'bool'),-DGU_PM_ACTIVE_HAS_IGNORE)
+ccflags-y += $(if $(shell grep -s 'unsigned int lock_system_sleep' $(srctree)/include/linux/suspend.h),-DGU_SLEEP_LOCK_FLAGS)
+ccflags-y += $(if $(shell grep -s 'msi_get_virq' $(srctree)/include/linux/msi.h $(srctree)/include/linux/msi_api.h),-DGU_MSI_GET_VIRQ)

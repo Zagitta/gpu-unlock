@@ -12,8 +12,7 @@ FWDIR      ?= /usr/lib/firmware/gpu-unlock/$(NV)
 LICENSEDIR ?= /usr/share/licenses
 PKG        ?= gpu-unlock
 
-MODULE_FILES   := $(filter-out %.mod.c,$(sort $(wildcard kernel/gpu_unlock/*.[ch]))) \
-                  kernel/gpu_unlock/Kbuild kernel/gpu_unlock/Makefile kernel/gpu_unlock/dkms.conf
+MODULE_FILES   := $(filter kernel/gpu_unlock/%,$(shell cat packaging/source-files))
 FIRMWARE_FILES := booter_load_ad102.bin booter_load_ga102.bin gsp_boot_ad102.bin gsp_boot_desc_ad102.bin \
                   booter_load_tu102.bin gsp_boot_tu102.bin gsp_boot_desc_tu102.bin sec2_bl_tu102.bin \
                   booter_load_ga100.bin falcon_loader.bin gsp_ga10x.bin gsp_tu10x.bin \
@@ -29,6 +28,7 @@ RPMDIR  := $(abspath $(DISTDIR))/rpm
 DEBS    := $(foreach p,dkms firmware,$(DEBDIR)/gpu-unlock-$(p)_$(VERSION)_all.deb)
 
 .PHONY: all dist inputs firmware assets install-dkms install-firmware \
+        install-overrides \
         install-mkinitcpio install-initramfs-tools install-dracut \
         install-licenses arch deb rpm install install-arch install-deb install-rpm \
         test-module test-packages
@@ -61,11 +61,20 @@ assets: inputs
 
 # The module source. It does nothing unless gpu_unlock.targets= is on the
 # kernel command line.
-install-dkms:
+install-dkms: install-overrides
 	grep -qx 'PACKAGE_VERSION="$(VERSION)"' kernel/gpu_unlock/dkms.conf
 	grep -q 'MODULE_VERSION("$(VERSION)")' kernel/gpu_unlock/main.c
 	install -Dm644 -t $(DESTDIR)$(DKMSDIR) $(MODULE_FILES)
 	install -Dm644 README.md $(DESTDIR)/usr/share/doc/gpu-unlock/README.md
+
+install-overrides:
+	install -Dm755 packaging/boot/prepare-overrides $(DESTDIR)/usr/lib/gpu-unlock/prepare-overrides
+	install -Dm755 packaging/boot/apply-procfs-override $(DESTDIR)/usr/lib/gpu-unlock/apply-procfs-override
+	install -Dm644 packaging/boot/modprobe.conf $(DESTDIR)/usr/lib/modprobe.d/gpu-unlock.conf
+	install -Dm644 packaging/boot/overrides.service $(DESTDIR)/usr/lib/systemd/system/gpu-unlock-overrides.service
+	install -d $(DESTDIR)/usr/lib/systemd/system/sysinit.target.wants $(DESTDIR)/usr/lib/firmware/nvidia
+	ln -sfn ../gpu-unlock-overrides.service $(DESTDIR)/usr/lib/systemd/system/sysinit.target.wants/gpu-unlock-overrides.service
+	ln -sfn /sys/kernel/gpu_unlock/overrides $(DESTDIR)/usr/lib/firmware/nvidia/gpu-unlock
 
 install-firmware:
 	install -Dm644 -t $(DESTDIR)$(FWDIR) $(addprefix $(ASSETS)/,$(FIRMWARE_FILES))
@@ -76,15 +85,20 @@ install-firmware:
 # the image so it runs before an nvidia module loaded from the initramfs.
 install-mkinitcpio:
 	install -Dm644 packaging/boot/mkinitcpio.conf $(DESTDIR)/etc/mkinitcpio.conf.d/zz-gpu-unlock.conf
+	install -Dm755 packaging/boot/overrides.mkinitcpio $(DESTDIR)/usr/lib/initcpio/install/gpu-unlock-overrides
+	install -Dm755 packaging/boot/overrides.hook $(DESTDIR)/usr/lib/initcpio/hooks/gpu-unlock-overrides
 
 install-initramfs-tools:
 	install -Dm644 packaging/boot/initramfs-tools.conf \
 		$(DESTDIR)/usr/share/initramfs-tools/modules.d/gpu-unlock.conf
 	install -Dm755 packaging/boot/initramfs-tools-init-top \
 		$(DESTDIR)/usr/share/initramfs-tools/scripts/init-top/gpu-unlock
+	install -Dm755 packaging/boot/overrides.initramfs-tools $(DESTDIR)/usr/share/initramfs-tools/hooks/gpu-unlock-overrides
 
 install-dracut:
 	install -Dm644 packaging/boot/dracut.conf $(DESTDIR)/usr/lib/dracut/dracut.conf.d/gpu-unlock.conf
+	install -Dm755 packaging/boot/overrides.dracut $(DESTDIR)/usr/lib/dracut/modules.d/91gpu-unlock-overrides/module-setup.sh
+	install -Dm755 packaging/boot/overrides.dracut-hook.sh $(DESTDIR)/usr/lib/dracut/modules.d/91gpu-unlock-overrides/prepare.sh
 
 install-licenses:
 	install -Dm644 -t $(DESTDIR)$(LICENSEDIR)/$(PKG) $(LICENSES)

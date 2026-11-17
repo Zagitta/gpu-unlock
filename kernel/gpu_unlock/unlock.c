@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Pre-driver V67 unlock, run before the stock driver binds: FWSEC-FRTS from
- * the board ROM, Booter with the V67 signature, the SS0/SS1 selector writes, then
- * FLR so the stock driver starts from a clean, halted GSP. After resume from
+ * Pre-driver unlock, run before the stock driver binds: FWSEC-FRTS from
+ * the board ROM, Booter with the recipe's write payload, then
+ * a SEC2 reset so the stock driver starts from a clean, halted GSP. An FLR only
+ * cleans up after a failure. After resume from
  * suspend it runs again on the card nvidia has suspended, before nvidia resumes it.
  */
 #include <linux/version.h>
@@ -21,13 +22,20 @@
 #include <linux/timekeeping.h>
 
 #include "diagnostic.h"
+#include "ecc.h"
 #include "falcon.h"
 #include "gfw_eval.h"
-#include "prep_610.h"
+#include "host.h"
+#include "inforom.h"
+#include "memory.h"
+#include "overrides.h"
+#include "vpr.h"
+#include "pcie.h"
+#include "prep.h"
 #include "recipes.h"
 #include "registers.h"
-#include "unlock_610.h"
-#include "vbios_610.h"
+#include "unlock.h"
+#include "vbios.h"
 
 enum gu_lifecycle { GU_ALLOCATED, GU_PUBLISHED, GU_ACTIVE, GU_STOCK, GU_QUIESCED };
 struct unlock_transaction_page {
@@ -44,19 +52,23 @@ struct unlock_dma {
 
 struct unlock_transaction_work {
 	struct pci_dev *pdev;
-	bool resume;	/* bound to nvidia, which suspended it before sleep */
+	bool resume;	/* bound to nvidia, which has suspended it */
 	void __iomem *bar;
 	resource_size_t bar_len;
 	u16 original_cmd;
 	bool cmd_valid;
+	struct pci_saved_state *previous_pci_state;
+	bool pci_save_attempted;
 	bool enabled;
 	bool region;
 	bool master;
-	const struct gpu_unlock_610_firmware *bundle; /* borrowed immutable shared assets */
-	const struct gpu_unlock_610_booter *booter;
+	const struct gpu_unlock_firmware *bundle; /* borrowed immutable shared assets */
+	const struct gpu_unlock_booter *booter;
 	const struct gu_payload *payload; /* borrowed, selected by the Booter */
 	const struct firmware *loader_fw;
-	u64 usable_fb, vga_base, frts_size;
+	u64 usable_fb, vga_base, frts_size; /* temporary firmware allocations */
+	struct gu_memory_info memory; /* final configuration for the stock driver */
+	struct gu_vpr_boot boot_vpr;
 	struct gpu_unlock_layout_out layout;
 	struct unlock_transaction_page *pages;
 	u32 page_count, pages_allocated;
@@ -67,10 +79,13 @@ struct unlock_transaction_work {
 	bool coherent_set;
 	enum gu_lifecycle state;
 	const struct gu_card *card;
+	struct gu_write_table privileged;
+	struct gu_reg_write *prepared_writes; /* owned, flattened before firmware starts */
+	bool ecc_enabled;
 	size_t write_index;
 	unsigned int attempt;
 	u32 frts_lo, frts_hi;
-	bool frts_saved, invocation_halted;
+	bool invocation_halted;
 	bool firmware_started;
 	bool retained;
 	bool error_reported;
@@ -136,7 +151,7 @@ static u32 pci_identity(const struct pci_dev *pdev)
 }
 
 static void *diag_dma_alloc(struct unlock_transaction_work *work, const char *name,
-			   size_t size, dma_addr_t *dma, gfp_t flags)
+			   size_t size, dma_addr_t *dma, unsigned int flags)
 {
 	void *memory = dma_alloc_coherent(&work->pdev->dev, size, dma, flags);
 	if (!memory)
@@ -234,6 +249,14 @@ static void gu_read_boot_state(struct unlock_transaction_work *work,
 /* Preserve the first failure state before unwind/FLR can hide it.  Every
  * read here is diagnostic: errors are ignored and must not replace the
  * original result. */
+/* Turing's MMU ranges share one permission register. */
+static u32 mmu_plm(const struct unlock_transaction_work *work, u32 reg)
+{
+	if (work->card && work->card->family->feat->plm == GU_TU102_FEAT_PLM_OFFSET)
+		return GU_TU102_MMU_PLM_OFFSET;
+	return reg;
+}
+
 static void gu_snapshot(struct unlock_transaction_work *work, const char *function,
 			unsigned int line, int error)
 {
@@ -256,13 +279,13 @@ static void gu_snapshot(struct unlock_transaction_work *work, const char *functi
 		payload = work->payload->name;
 	gu_read_boot_state(work, &b);
 	if (work->card && work->card->family) {
-		read_bar(work, work->card->family->feat_plm, &feat);
-		read_bar(work, work->card->family->feat_ss0, &ss0);
-		read_bar(work, work->card->family->feat_ss1, &ss1);
+		read_bar(work, work->card->family->feat->plm, &feat);
+		read_bar(work, work->card->family->feat->ss0, &ss0);
+		read_bar(work, work->card->family->feat->ss1, &ss1);
 	}
-	read_bar(work, GU_WPR_CFG_PLM_OFFSET, &wpr_cfg);
-	read_bar(work, GU_WPR_PLM_OFFSET, &wpr);
-	read_bar(work, GU_MMU_LOCK_CFG_PLM_OFFSET, &lock);
+	read_bar(work, mmu_plm(work, GU_WPR_CFG_PLM_OFFSET), &wpr_cfg);
+	read_bar(work, mmu_plm(work, GU_WPR_PLM_OFFSET), &wpr);
+	read_bar(work, mmu_plm(work, GU_MMU_LOCK_CFG_PLM_OFFSET), &lock);
 	diag_pci_word(work, false, PCI_COMMAND, &command);
 	diag_pci_word(work, true, PCI_EXP_DEVSTA, &devsta);
 	if (work->streaming_ptr)
@@ -281,10 +304,9 @@ static void gu_snapshot(struct unlock_transaction_work *work, const char *functi
 		b.reset_plm, b.ctl, b.engine, b.fhstate, b.mailbox1, b.mailbox0,
 		b.acr, b.csberr, b.ok);
 	dev_err(&work->pdev->dev,
-		"gpu_unlock: wpr2 lo=%#x hi=%#x start=%#llx end=%#llx frts=%#x:%#x saved=%u\n",
+		"gpu_unlock: wpr2 lo=%#x hi=%#x start=%#llx end=%#llx frts=%#x:%#x\n",
 		b.wpr_lo, b.wpr_hi, (unsigned long long)start,
-		(unsigned long long)end, work->frts_lo, work->frts_hi,
-		work->frts_saved);
+		(unsigned long long)end, work->frts_lo, work->frts_hi);
 	dev_err(&work->pdev->dev,
 		"gpu_unlock: plm feat=%#x rd=%#x wr=%#x src=%#x rv=%u wv=%u wpr_cfg=%#x wpr=%#x lock=%#x ss0=%#x ss1=%#x\n",
 		feat, feat & 0xfu, (feat >> 4) & 0xfu, feat >> 12,
@@ -301,6 +323,8 @@ static void gu_snapshot(struct unlock_transaction_work *work, const char *functi
 		(unsigned long long)work->streaming_before,
 		(unsigned long long)work->coherent_before, dma_now, coherent_now,
 		work->firmware_started, work->master, work->state == GU_QUIESCED);
+	if (work->ecc_enabled)
+		gu_ecc_log(&work->pdev->dev, work->bar, work->bar_len, "failure");
 }
 
 static int alloc_dma(struct unlock_transaction_work *work, const char *name,
@@ -419,7 +443,7 @@ static int unlock_transaction_unwind(struct unlock_transaction_work *work)
 	if (want != now && pci_write_config_word(work->pdev, PCI_COMMAND, want))
 		return GU_RESULT(-EIO);
 	/* nvidia does not set BME again on resume. pci_clear_master() before the
-	 * FLR also cleared the PCI core's record of it; set both back. */
+	 * handover also cleared the PCI core's record of it; set both back. */
 	if (work->resume && (want & PCI_COMMAND_MASTER))
 		pci_set_master(work->pdev);
 	if (diag_pci_word(work, false, PCI_COMMAND, &now))
@@ -439,42 +463,42 @@ static int unlock_transaction_layout(struct unlock_transaction_work *work)
 	u32 mb, vga, lo, hi, plm;
 	int ret;
 
-	if (work->card->family->turing_layout) {
+	if (work->card->family->memory == GU_MEMORY_RANGE) {
 		ktime_t deadline = ktime_add_us(ktime_get(), 3000000);
-		u32 range = 0, vga_reg = 0, mag, scale;
-		u64 fb_bytes;
+		u32 range = 0, vga_reg = 0;
+		struct gu_memory_info memory;
 
 		for (;;) {
-			if (read_bar(work, GU_TU102_FB_RANGE_OFFSET, &range) ||
+			if (read_bar(work, GU_LOCAL_MEMORY_RANGE_OFFSET, &range) ||
 			    read_bar(work, GU_VGA_WORKSPACE_BASE_OFFSET, &vga_reg))
 				return GU_RESULT(-ENODEV);
-			if (range != ~0u && (range & 0xffff0000u) != 0xbadf0000u &&
+			if (!inaccessible(range) &&
 			    ((range >> 4) & 0x3fu))
 				break;
 			if (ktime_compare(ktime_get(), deadline) >= 0) {
 				dev_err(&work->pdev->dev,
-					"layout rejected: Turing FB range not ready (%#x)\n", range);
+					"layout rejected: FB range not ready (%#x)\n", range);
 				return GU_RESULT(-ETIMEDOUT);
 			}
 			usleep_range(20000, 21000);
 		}
 		dev_dbg(&work->pdev->dev,
-			 "layout inputs: tu102 range=%#x vga=%#x image=%llu boot=%u\n",
+			 "layout inputs: range=%#x vga=%#x image=%llu boot=%u\n",
 			 range, vga_reg,
 			 (unsigned long long)work->bundle->image_span.size,
 			 work->bundle->boot_desc.image_size);
-		mag = (range >> 4) & 0x3fu;
-		scale = range & 0xfu;
-		fb_bytes = (u64)mag << (scale + 20);
-		if (range & (1u << 30))
-			fb_bytes = fb_bytes / 16 * 15;
-		in->usable_fb = fb_bytes;
+		ret = gu_memory_decode_range(range, &memory);
+		if (ret)
+			return GU_RESULT(ret);
+		in->usable_fb = memory.usable_bytes;
 		if (in->usable_fb < 256ull << 20) {
 			dev_err(&work->pdev->dev, "layout rejected: usable FB below 256 MiB\n");
 			return GU_RESULT(-ERANGE);
 		}
 		in->vga_base = in->usable_fb - (1ull << 20);
-		if (vga_reg & (1u << 3)) {
+		/* GA100 can return a PRI error for the VGA workspace register.
+		 * Keep the top 1 MiB fallback unless it reports a valid base. */
+		if (!inaccessible(vga_reg) && (vga_reg & (1u << 3))) {
 			in->vga_base = (u64)(vga_reg >> 8) << 16;
 			if (in->vga_base < in->usable_fb - (1ull << 20))
 				in->vga_base = in->usable_fb - 0x20000;
@@ -483,19 +507,15 @@ static int unlock_transaction_layout(struct unlock_transaction_work *work)
 			dev_err(&work->pdev->dev, "layout rejected: VGA base at or above usable FB\n");
 			return GU_RESULT(-ERANGE);
 		}
-		in->mmu_lock_valid = false;
 	} else {
-		if (read_bar(work, GU_GFW_FB_SIZE_OFFSET, &mb) || !mb || mb == ~0u ||
-		    read_bar(work, GU_VGA_WORKSPACE_BASE_OFFSET, &vga) || vga == ~0u ||
-		    read_bar(work, GU_MMU_LOCK_CFG_PLM_OFFSET, &plm) || plm == ~0u || !(plm & 1) ||
-		    read_bar(work, GU_MMU_LOCK_ADDR_LO_OFFSET, &lo) || lo == ~0u ||
-		    read_bar(work, GU_MMU_LOCK_ADDR_HI_OFFSET, &hi) || hi == ~0u)
+		if (read_bar(work, GU_GFW_FB_SIZE_OFFSET, &mb) || !mb || inaccessible(mb) ||
+		    read_bar(work, GU_VGA_WORKSPACE_BASE_OFFSET, &vga) || inaccessible(vga))
 			return GU_RESULT(-ENODEV);
 		/* Keep the cold board inputs in the USB kernel log even on layout failure.
 		 * Register values after NVIDIA binds cannot reconstruct this state. */
 		dev_dbg(&work->pdev->dev,
-			 "layout inputs: fb_mb=%#x vga=%#x mmu_plm=%#x mmu_lo=%#x mmu_hi=%#x image=%llu boot=%u\n",
-			 mb, vga, plm, lo, hi, (unsigned long long)work->bundle->image_span.size,
+			 "layout inputs: fb_mb=%#x vga=%#x image=%llu boot=%u\n",
+			 mb, vga, (unsigned long long)work->bundle->image_span.size,
 			 work->bundle->boot_desc.image_size);
 		in->usable_fb = (u64)mb << 20;
 		if (in->usable_fb < 256ull << 20) {
@@ -513,29 +533,38 @@ static int unlock_transaction_layout(struct unlock_transaction_work *work)
 			dev_err(&work->pdev->dev, "layout rejected: VGA base at or above usable FB\n");
 			return GU_RESULT(-ERANGE);
 		}
-		in->mmu_lock_low = (u64)(lo >> 4) << 12;
-		{
-			/* VAL is bits 31:4; the address is that field shifted by 12.
-			 * memmgrBlockMemLockedMemory_GA100 only treats the lock as the
-			 * VBIOS end-of-FB reservation when its exclusive high address is
-			 * the FB top. A lock elsewhere is not that reservation. GA102
-			 * has no scrubber, so WPR must stay in the pre-scrubbed top. */
-			u64 mmu_hi = (u64)(hi >> 4) << 12;
-			u64 mmu_top = mmu_hi > ~0ull - 0xffffull ? ~0ull :
-				(mmu_hi + 0xffffull) & ~0xffffull;
-			bool top_lock;
+	}
+	/* Capacity discovery differs, but all temporary layouts must honor the
+	 * VBIOS end-of-FB reservation, including the GA100 row-remapper hole. */
+	if (read_bar(work, mmu_plm(work, GU_MMU_LOCK_CFG_PLM_OFFSET), &plm) ||
+	    inaccessible(plm) || !(plm & 1) ||
+	    read_bar(work, GU_MMU_LOCK_ADDR_LO_OFFSET, &lo) || inaccessible(lo) ||
+	    read_bar(work, GU_MMU_LOCK_ADDR_HI_OFFSET, &hi) || inaccessible(hi))
+		return GU_RESULT(-ENODEV);
+	dev_dbg(&work->pdev->dev,
+		 "layout inputs: mmu_plm=%#x mmu_lo=%#x mmu_hi=%#x\n", plm, lo, hi);
+	in->mmu_lock_low = (u64)(lo >> 4) << 12;
+	{
+		/* VAL is bits 31:4; the address is that field shifted by 12.
+		 * memmgrBlockMemLockedMemory_GA100 only treats the lock as the
+		 * VBIOS end-of-FB reservation when its exclusive high address is
+		 * the FB top. A lock elsewhere is not that reservation. The temporary
+		 * Booter allocations must stay in the pre-scrubbed top. */
+		u64 mmu_hi = (u64)(hi >> 4) << 12;
+		u64 mmu_top = mmu_hi > ~0ull - 0xffffull ? ~0ull :
+			(mmu_hi + 0xffffull) & ~0xffffull;
+		bool top_lock;
 
-			in->mmu_lock_valid = mmu_hi >= in->mmu_lock_low;
-			top_lock = in->mmu_lock_valid && (mmu_top >> 20) == (in->usable_fb >> 20);
+		in->mmu_lock_valid = mmu_hi >= in->mmu_lock_low;
+		top_lock = in->mmu_lock_valid && (mmu_top >> 20) == (in->usable_fb >> 20);
+		dev_dbg(&work->pdev->dev,
+			 "layout mmu: lo=%#llx hi=%#llx hi_exclusive=%#llx constrain=%u\n",
+			 (unsigned long long)in->mmu_lock_low, (unsigned long long)mmu_hi,
+			 (unsigned long long)mmu_top, top_lock);
+		if (!top_lock) {
 			dev_dbg(&work->pdev->dev,
-				 "layout mmu: lo=%#llx hi=%#llx hi_exclusive=%#llx constrain=%u\n",
-				 (unsigned long long)in->mmu_lock_low, (unsigned long long)mmu_hi,
-				 (unsigned long long)mmu_top, top_lock);
-			if (!top_lock) {
-				dev_dbg(&work->pdev->dev,
-					 "mmu lock ignored: high address is not the FB top\n");
-				in->mmu_lock_valid = false;
-			}
+				 "mmu lock ignored: high address is not the FB top\n");
+			in->mmu_lock_valid = false;
 		}
 	}
 	in->frts_size = 1ull << 20;
@@ -564,9 +593,9 @@ static int unlock_transaction_layout(struct unlock_transaction_work *work)
 		 (unsigned long long)work->layout.frts_offset,
 		 (unsigned long long)work->layout.wpr_end,
 		 (unsigned long long)(in->usable_fb - (256ull << 20)));
-	/* GA102 has no scrubber: all reservations must fit the pre-scrubbed top.
-	 * Turing uses the VBIOS FB range without that scrubber constraint. */
-	if (!work->card->family->turing_layout &&
+	/* The temporary Booter cannot scrub its own allocations: keep them in
+	 * the pre-scrubbed top. The later NISO scrub runs after it is retired. */
+	if (work->card->family->memory != GU_MEMORY_RANGE &&
 	    work->layout.nonwpr_start < in->usable_fb - (256ull << 20)) {
 		dev_err(&work->pdev->dev, "layout rejected: reservations below pre-scrubbed top 256 MiB\n");
 		return GU_RESULT(-ERANGE);
@@ -653,7 +682,7 @@ static int unlock_transaction_claim(struct unlock_transaction_work *work)
 	     (work->pdev->current_state != PCI_UNKNOWN || !work->pdev->pm_cap)) ||
 	    (work->pdev->pm_cap &&
 	     (diag_pci_word(work, false, work->pdev->pm_cap + PCI_PM_CTRL, &pmcsr) ||
-	      !gpu_unlock_pmcsr_d0(pmcsr))))
+	      (pmcsr & PCI_PM_CTRL_STATE_MASK) != PCI_D0)))
 		return GU_RESULT(-EOPNOTSUPP);
 	if ((work->pdev->dev_flags & PCI_DEV_FLAGS_NO_FLR_RESET) ||
 	    !pci_is_pcie(work->pdev) ||
@@ -703,6 +732,13 @@ static int unlock_transaction_claim(struct unlock_transaction_work *work)
 	for (i = 0; i < ARRAY_SIZE(work->bars); i++)
 		if (diag_pci_dword(work, false, PCI_BASE_ADDRESS_0 + i * 4, &work->bars[i]))
 			return GU_RESULT(-EIO);
+	if (work->pdev->state_saved) {
+		work->previous_pci_state = pci_store_saved_state(work->pdev);
+		if (!work->previous_pci_state)
+			return GU_RESULT(-ENOMEM);
+	}
+	/* pci_save_state() can alter the cache even when it returns an error. */
+	work->pci_save_attempted = true;
 	ret = pci_save_state(work->pdev);
 	if (ret)
 		return GU_RESULT(ret);
@@ -772,22 +808,86 @@ static int unlock_transaction_dma(struct unlock_transaction_work *work)
 	}
 }
 
+static struct gu_falcon_engine gsp_engine(const struct unlock_transaction_work *work)
+{
+	return (struct gu_falcon_engine){
+		.base = GU_GSP_BASE, .fbif = GU_GSP_FBIF_BASE, .falcon2 = GU_GSP_FALCON2_BASE,
+		.dmactl_scrub = work->card->family->scrub_via_dmactl,
+	};
+}
+
+static struct gu_falcon_engine sec2_engine(const struct unlock_transaction_work *work)
+{
+	return (struct gu_falcon_engine){
+		.base = GU_SEC2_BASE, .fbif = GU_SEC2_FBIF_BASE, .falcon2 = GU_SEC2_FALCON2_BASE,
+		.dmactl_scrub = work->card->family->scrub_via_dmactl,
+	};
+}
+
+/* Run the patched FWSEC image in work->fwsec, laid out as fw, on GSP. */
+static int launch_fwsec(struct unlock_transaction_work *work,
+			const struct gpu_unlock_fwsec *fw)
+{
+	const struct gu_falcon_engine gsp = gsp_engine(work);
+	struct gu_falcon_io io = falcon_io(work);
+	struct gu_falcon_evidence launch = { };
+	u16 command;
+	int ret;
+
+	pci_set_master(work->pdev);
+	work->master = true;
+	if (diag_pci_word(work, false, PCI_COMMAND, &command) ||
+	    command == 0xffff || !(command & PCI_COMMAND_MASTER))
+		return -EIO;
+	/* Preserve conservative DMA retention from the moment FWSEC may access it,
+	 * including reset/load failures. Launch evidence is observed separately. */
+	work->firmware_started = true;
+	if (fw->version == 2) {
+		const struct gu_falcon_loader_image program = {
+			.loader = work->loader_fw ? (const u32 *)work->loader_fw->data : NULL,
+			.loader_size = work->loader_fw ? work->loader_fw->size : 0,
+			.dma = work->fwsec.dma, .data_off = fw->data_off,
+			.imem_pa = fw->imem_pa, .imem_ns_size = fw->imem_ns_size,
+			.imem_sec_pa = fw->imem_sec_pa, .imem_sec_size = fw->imem_sec_size,
+			.dmem_size = fw->dmem_size,
+		};
+		ret = gu_falcon_loader(&io, &gsp, &program, &launch);
+	} else {
+		const struct gu_falcon_hs_image program = {
+			.dma = work->fwsec.dma, .code_off = 0, .code_size = fw->imem_size,
+			.code_va = fw->imem_va, .code_pa = fw->imem_pa,
+			.data_off = fw->data_off, .data_size = fw->dmem_size,
+			.data_pa = fw->dmem_pa, .sig_dmem = fw->pkc_off,
+			.engine_mask = fw->engine_mask, .ucode_id = fw->ucode_id,
+			/* The WPR2 check after the launch proves FWSEC-FRTS ran. */
+			.stale_halt_ok = true,
+		};
+		ret = gu_falcon_hs(&io, &gsp, &program, &launch);
+	}
+	dev_dbg(&work->pdev->dev, "FWSEC launch: result=%d started=%u halted=%u reset=%u/%u reloaded=%u\n",
+		ret, launch.started, launch.halted, launch.reset_asserted,
+		launch.reset_released, launch.reloaded);
+	return ret;
+}
+
 static int unlock_transaction_fwsec(struct unlock_transaction_work *work)
 {
-	static const struct gu_falcon_engine gsp = {
-		.base = GU_GSP_BASE, .fbif = GU_GSP_FBIF_BASE, .falcon2 = GU_GSP_FALCON2_BASE,
-	};
-	struct gu_falcon_io io = falcon_io(work);
 	size_t mapped = 0;
 	u8 *rom = NULL;
 	struct gpu_unlock_fwsec fw;
 	u32 fuse_raw = 0, version = 0, scratch = 0, wpr_lo = 0, wpr_hi = 0;
-	u16 command;
-	struct gu_falcon_evidence launch = { };
 	u64 frts = work->layout.frts_offset;
 	int ret;
 
-	/* kgspExtractVbiosFromRom_TU102 reads up to 1 MiB.
+	if (!work->card->family->frts) {
+		/* GA100 has no stock GSP-FRTS (kgspGetFrtsSize returns zero).
+		 * Its SEC2 Booter programs its own window on every launch. */
+		pci_set_master(work->pdev);
+		work->master = true;
+		work->firmware_started = true;
+		return 0;
+	}
+	/* kgspExtractVbiosFromRom_TU102 reads NV_PROM_DATA, up to 1 MiB.
 	 * pci_map_rom stops at the PCI last-image flag and hides the VN extension. */
 	dev_dbg(&work->pdev->dev, "FWSEC: reading PROM at %#x\n", GU_PROM_DATA_OFFSET);
 	if (work->bar_len < GU_PROM_DATA_OFFSET + 0x1a)
@@ -832,54 +932,20 @@ static int unlock_transaction_fwsec(struct unlock_transaction_work *work)
 			goto out;
 		memcpy((u8 *)work->fwsec.cpu + fw.data_off + fw.pkc_off, rom + fw.sig_off + sig_at, 384);
 	}
-	pci_set_master(work->pdev);
-	work->master = true;
-	if (diag_pci_word(work, false, PCI_COMMAND, &command) ||
-	    command == 0xffff || !(command & PCI_COMMAND_MASTER)) {
-		ret = -EIO;
-		goto out;
-	}
-	/* Preserve conservative DMA retention from the moment FWSEC may access it,
-	 * including reset/load failures. Launch evidence is observed separately. */
-	work->firmware_started = true;
-	if (fw.version == 2) {
-		const struct gu_falcon_loader_image program = {
-			.loader = work->loader_fw ? (const u32 *)work->loader_fw->data : NULL,
-			.loader_size = work->loader_fw ? work->loader_fw->size : 0,
-			.dma = work->fwsec.dma, .data_off = fw.data_off,
-			.imem_pa = fw.imem_pa, .imem_ns_size = fw.imem_ns_size,
-			.imem_sec_pa = fw.imem_sec_pa, .imem_sec_size = fw.imem_sec_size,
-			.dmem_size = fw.dmem_size,
-		};
-		ret = gu_falcon_loader(&io, &gsp, &program, &launch);
-	} else {
-		const struct gu_falcon_hs_image program = {
-			.dma = work->fwsec.dma, .code_off = 0, .code_size = fw.imem_size,
-			.code_va = fw.imem_va, .code_pa = fw.imem_pa,
-			.data_off = fw.data_off, .data_size = fw.dmem_size,
-			.data_pa = fw.dmem_pa, .sig_dmem = fw.pkc_off,
-			.engine_mask = fw.engine_mask, .ucode_id = fw.ucode_id,
-			/* The WPR2 check below proves FWSEC-FRTS ran. */
-			.stale_halt_ok = true,
-		};
-		ret = gu_falcon_hs(&io, &gsp, &program, &launch);
-	}
+	ret = launch_fwsec(work, &fw);
 	if (ret)
 		goto out;
 	if (read_bar(work, GU_ACR_SCRATCH_OFFSET, &scratch)) {
 		ret = -EIO;
 		goto out;
 	}
-	dev_dbg(&work->pdev->dev,
-		 "FWSEC result: scratch=%#x expected_hi16=0 started=%u halted=%u reset=%u/%u reloaded=%u\n",
-		 scratch, launch.started, launch.halted, launch.reset_asserted,
-		 launch.reset_released, launch.reloaded);
+	dev_dbg(&work->pdev->dev, "FWSEC result: scratch=%#x expected_hi16=0\n", scratch);
 	if (scratch >> 16) {
 		ret = -EIO;
 		goto out;
 	}
-	if (read_bar(work, GU_WPR2_ADDR_LO_OFFSET, &wpr_lo) || wpr_lo == ~0u ||
-	    read_bar(work, GU_WPR2_ADDR_HI_OFFSET, &wpr_hi) || wpr_hi == ~0u) {
+	if (read_bar(work, GU_WPR2_ADDR_LO_OFFSET, &wpr_lo) || inaccessible(wpr_lo) ||
+	    read_bar(work, GU_WPR2_ADDR_HI_OFFSET, &wpr_hi) || inaccessible(wpr_hi)) {
 		ret = -EIO;
 		goto out;
 	}
@@ -900,7 +966,7 @@ static int unlock_transaction_fwsec(struct unlock_transaction_work *work)
 
 		/* FWSEC publishes the inclusive 4 KiB end; the Booter decodes
 		 * WPR2_ADDR_HI with a 128 KiB alignment term. Store the Booter
-		 * encoding so restore_frts() writes what the next HS launch
+		 * encoding so the FRTS restore writes what the next HS launch
 		 * re-validates, not the FWSEC convention. */
 		if (frts_end < GU_WPR2_ALIGN || (frts_end & (GU_WPR2_ALIGN - 1))) {
 			ret = -EINVAL;
@@ -911,7 +977,6 @@ static int unlock_transaction_fwsec(struct unlock_transaction_work *work)
 				wpr_hi, booter_hi, (unsigned long long)frts_end);
 			work->frts_lo = wpr_lo;
 			work->frts_hi = booter_hi;
-			work->frts_saved = true;
 		}
 	}
 out:
@@ -923,6 +988,49 @@ out:
 	/* Ownership transfers to work before publication, including failure paths. */
 	kvfree(rom);
 	return GU_RESULT(ret);
+}
+
+/* PreOS leaves the InfoROM aperture restricted until the host asks it to
+ * exit. Match RM's PMU handshake, not a PMU reset or a ROM-window override.
+ * Power-loss resume can run PreOS again; identify it by firmware state. */
+static int unlock_transaction_preos(struct unlock_transaction_work *work)
+{
+	struct gu_falcon_io io = falcon_io(work);
+	u32 progress, mode, control, request, window;
+	u32 control_reg = GU_PMU_BASE + GU_FALCON_CPUCTL_OFFSET;
+	int ret;
+
+	if (read_bar(work, GU_PREOS_PROGRESS_OFFSET, &progress) || inaccessible(progress))
+		return GU_RESULT(-EIO);
+	if (read_bar(work, GU_ROM_WINDOW_OFFSET, &window) || inaccessible(window))
+		return GU_RESULT(-EIO);
+	dev_info(&work->pdev->dev, "gpu_unlock: stage=preos progress=%#x window=%#x\n",
+		 progress, window);
+	if (((progress >> 12) & 0xf) != 1)
+		return 0;
+	mode = 0;
+	if (work->card->family->pmu_riscv) {
+		if (read_bar(work, GU_PMU_RISCV_BASE + GU_RISCV_BCR_CTRL_OFFSET, &mode) || inaccessible(mode))
+			return GU_RESULT(-EIO);
+		if (mode & (1u << 4))
+			control_reg = GU_PMU_RISCV_BASE + GU_RISCV_CPUCTL_OFFSET;
+	}
+	if (read_bar(work, control_reg, &control) || inaccessible(control))
+		return GU_RESULT(-EIO);
+	if (control & (1u << 4))
+		return 0;
+	if (read_bar(work, GU_PREOS_REQUEST_OFFSET, &request) || inaccessible(request))
+		return GU_RESULT(-EIO);
+	dev_info(&work->pdev->dev, "gpu_unlock: requesting PreOS exit progress=%#x mode=%#x control=%#x\n",
+		 progress, mode, control);
+	write_bar(work, GU_PREOS_REQUEST_OFFSET, request | GU_PREOS_EXIT_REQUEST);
+	ret = gu_falcon_poll(&io, control_reg, 1u << 4, 1u << 4, 10000, true, &control);
+	if (ret)
+		return GU_RESULT(ret);
+	if (read_bar(work, GU_ROM_WINDOW_OFFSET, &window) || inaccessible(window))
+		return GU_RESULT(-EIO);
+	dev_info(&work->pdev->dev, "gpu_unlock: stage=preos halted=1 window=%#x\n", window);
+	return 0;
 }
 
 static int unlock_transaction_gfw(struct unlock_transaction_work *work)
@@ -943,21 +1051,13 @@ static int unlock_transaction_gfw(struct unlock_transaction_work *work)
 			sample.config_ok = true;
 		assessed = gpu_unlock_gfw_assess(&sample);
 		if (!assessed) {
-			u32 ss0, ss1, wpr_hi, plm;
+			u32 wpr_lo, wpr_hi;
 
-			if (read_bar(work, work->card->family->feat_plm, &plm) ||
-			    read_bar(work, work->card->family->feat_ss0, &ss0) || ss0 == ~0u ||
-			    read_bar(work, work->card->family->feat_ss1, &ss1) || ss1 == ~0u ||
+			if (read_bar(work, GU_WPR2_ADDR_LO_OFFSET, &wpr_lo) || inaccessible(wpr_lo) ||
 			    read_bar(work, GU_WPR2_ADDR_HI_OFFSET, &wpr_hi) || inaccessible(wpr_hi))
 				return GU_RESULT(-ENODEV);
-			dev_dbg(&work->pdev->dev, "entry: plm=%#x ss0=%#x ss1=%#x wpr2_hi=%#x\n",
-				 plm, ss0, ss1, wpr_hi);
 			dev_info(&work->pdev->dev,
-				 "gpu_unlock: stage=gfw plm=%#x ss0=%#x ss1=%#x wpr2_hi=%#x\n",
-				 plm, ss0, ss1, wpr_hi);
-			/* An open PLM means the card was already unlocked or not cold. */
-			if (plm == ~0u)
-				return GU_RESULT(-EALREADY);
+				 "gpu_unlock: stage=gfw wpr2=%#x:%#x\n", wpr_hi, wpr_lo);
 			/* WPR2 is down from power-on until FWSEC-FRTS runs. An enabled
 			 * WPR2 means a driver has already used the card this power
 			 * cycle; starting FWSEC and Booter again from here is untested.
@@ -976,15 +1076,27 @@ static int unlock_transaction_gfw(struct unlock_transaction_work *work)
 	}
 }
 
+static bool runtime_unlock_retained(struct unlock_transaction_work *work)
+{
+	const struct gu_family *family = work->card->family;
+	u32 ss0, ss1;
+
+	return family->selectors.count &&
+	       !read_bar(work, family->feat->ss0, &ss0) &&
+	       !read_bar(work, family->feat->ss1, &ss1) &&
+	       ss0 == GU_SS0_UNLOCK && ss1 == GU_SS1_UNLOCK;
+}
+
 /* After resume nvidia has suspended the card: its GSP-RM is down and BAR0's
  * region stays nvidia's, so BAR0 is mapped without a request. Nothing is
- * written until the card is known to have lost power: WPR2 down, the selectors
- * back at their power-on values and GFW finished again.
+ * written until WPR2 is down and GFW has finished again. Returns 1 when
+ * runtime suspend retained the unlock and no writes are needed.
  */
-static int unlock_transaction_suspended(struct unlock_transaction_work *work)
+static int unlock_transaction_suspended(struct unlock_transaction_work *work, bool runtime)
 {
-	u32 wpr_hi, ss0, ss1;
+	u32 wpr_hi;
 	u16 command;
+	int ret;
 
 	if (diag_pci_word(work, false, PCI_COMMAND, &command) || command == 0xffff ||
 	    !(command & PCI_COMMAND_MEMORY))
@@ -996,30 +1108,27 @@ static int unlock_transaction_suspended(struct unlock_transaction_work *work)
 	if (!work->bar)
 		return GU_RESULT(-ENOMEM);
 	/* Read before GFW completes, so an unreadable value proves nothing yet. */
-	if (read_bar(work, GU_WPR2_ADDR_HI_OFFSET, &wpr_hi) ||
-	    read_bar(work, work->card->family->feat_ss0, &ss0) ||
-	    read_bar(work, work->card->family->feat_ss1, &ss1))
+	if (read_bar(work, GU_WPR2_ADDR_HI_OFFSET, &wpr_hi))
 		return GU_RESULT(-EIO);
-	dev_dbg(&work->pdev->dev, "resume entry: wpr2_hi=%#x ss0=%#x ss1=%#x\n",
-		 wpr_hi, ss0, ss1);
 	dev_info(&work->pdev->dev,
-		 "gpu_unlock: stage=resume-entry wpr2_hi=%#x ss0=%#x ss1=%#x cmd=%#x\n",
-		 wpr_hi, ss0, ss1, command);
+		 "gpu_unlock: stage=resume-entry wpr2_hi=%#x cmd=%#x\n",
+		 wpr_hi, command);
 	if (!inaccessible(wpr_hi) && (wpr_hi >> 4)) {
+		if (runtime && runtime_unlock_retained(work))
+			return 1;
 		dev_dbg(&work->pdev->dev, "resume: GSP-RM already running (WPR2 enabled); card left as is\n");
 		return -EBUSY;
 	}
-	/* Sleep that kept the card powered (suspend to idle, an aborted suspend). */
-	if (ss0 == GU_SS0_UNLOCK && ss1 == GU_SS1_UNLOCK)
-		return -EALREADY;
-	return unlock_transaction_gfw(work);
+	ret = unlock_transaction_gfw(work);
+	/* Do not trust retained selectors until ROM firmware has finished. */
+	if (!ret && runtime && runtime_unlock_retained(work))
+		return 1;
+	return ret;
 }
 
 static int unlock_transaction_boot(struct unlock_transaction_work *work)
 {
-	static const struct gu_falcon_engine sec2 = {
-		.base = GU_SEC2_BASE, .fbif = GU_SEC2_FBIF_BASE, .falcon2 = GU_SEC2_FALCON2_BASE,
-	};
+	const struct gu_falcon_engine sec2 = sec2_engine(work);
 	const struct gpu_unlock_booter_hdr *h = &work->booter->hdr;
 	struct gu_falcon_io io = falcon_io(work);
 	struct gu_falcon_evidence launch = { };
@@ -1070,8 +1179,8 @@ static int unlock_transaction_boot(struct unlock_transaction_work *work)
 		return GU_RESULT(-ENODEV);
 	read_bar(work, GU_WPR2_ADDR_LO_OFFSET, &wpr_lo);
 	read_bar(work, GU_WPR2_ADDR_HI_OFFSET, &wpr_hi);
-	read_bar(work, work->card->family->feat_plm, &feat);
-	read_bar(work, GU_WPR_CFG_PLM_OFFSET, &wpr_cfg);
+	read_bar(work, work->card->family->feat->plm, &feat);
+	read_bar(work, mmu_plm(work, GU_WPR_CFG_PLM_OFFSET), &wpr_cfg);
 	read_bar(work, GU_SEC2_BASE + GU_SEC2_CSBERRSTAT_OFFSET, &csberr);
 	read_bar(work, GU_SEC2_BASE + GU_FALCON_FHSTATE_OFFSET, &fhstate);
 	dev_dbg(&work->pdev->dev,
@@ -1081,10 +1190,9 @@ static int unlock_transaction_boot(struct unlock_transaction_work *work)
 	work->invocation_halted = !!(ctl & 16);
 	fresh = launch.reset_asserted && launch.reset_released &&
 		launch.reloaded && launch.started && work->invocation_halted;
-	/* The V67 exit returns the input metadata pointer in the mailboxes; the
-	 * descriptor records that because it is a payload property, not a Booter
-	 * or hardware convention. Payloads without that evidence are accepted on
-	 * the generic halt/RESET_PLM predicate and their mailboxes are logged. */
+	/* A payload can return the input metadata pointer in the mailboxes; its
+	 * descriptor records that completion evidence. Payloads without that
+	 * evidence use the generic halt/RESET_PLM predicate and log the mailboxes. */
 	cleanup_complete = fresh && (reset_plm & 0xff) == 0xff;
 	if (cleanup_complete &&
 	    work->payload->completion == GU_PAYLOAD_HALT_RESET_PLM_ECHO)
@@ -1103,7 +1211,18 @@ static int unlock_transaction_boot(struct unlock_transaction_work *work)
 		 engine, GU_SEC2_RESET_PLM_OFFSET, reset_plm, mailbox1, mailbox0,
 		 scratch, csberr, fhstate, wpr_hi, wpr_lo, feat, wpr_cfg,
 		 fresh, cleanup_complete, ret);
-	if (ret || !cleanup_complete)
+	if (ret || !cleanup_complete) {
+		if (work->card->chip == 0x170) {
+			u32 csr = ~0u, addr = ~0u, data = ~0u;
+
+			read_bar(work, GU_SEC2_BASE + GU_FALCON_BAR0_CSR_OFFSET, &csr);
+			read_bar(work, GU_SEC2_BASE + GU_FALCON_BAR0_ADDR_OFFSET, &addr);
+			read_bar(work, GU_SEC2_BASE + GU_FALCON_BAR0_DATA_OFFSET, &data);
+			dev_err(&work->pdev->dev,
+				"gpu_unlock: SEC2 request failure csr=%#x status=%#x addr=%#x data=%#x readable=%u\n",
+				csr, (csr >> 12) & 7, addr, data,
+				!inaccessible(csr) && !inaccessible(addr));
+		}
 		dev_err(&work->pdev->dev,
 			"invocation failed: index=%zu attempt=%u cpuctl=%#x engine=%#x reset_plm=%#x mailbox=%#x:%#x acr=%#x csberr=%#x fhstate=%#x wpr2=%#x:%#x plm_feat=%#x plm_wpr_cfg=%#x target=%#x:%#x reset=%u/%u reload=%u start=%u fresh=%u cleanup=%u error=%d\n",
 			work->write_index, work->attempt, ctl, engine, reset_plm,
@@ -1111,6 +1230,7 @@ static int unlock_transaction_boot(struct unlock_transaction_work *work)
 			feat, wpr_cfg, work->target_addr, work->target_value,
 			launch.reset_asserted, launch.reset_released, launch.reloaded,
 			launch.started, fresh, cleanup_complete, ret ? ret : -EIO);
+	}
 	return GU_RESULT(ret ? ret : cleanup_complete ? 0 : -EIO);
 }
 
@@ -1165,38 +1285,6 @@ static int restore_stock_signature(struct unlock_transaction_work *work)
 	return 0;
 }
 
-static int restore_frts(struct unlock_transaction_work *work)
-{
-	u32 lo = 0, hi = 0;
-	if (!work->frts_saved)
-		return GU_RESULT(-EPROTO);
-	read_bar(work, GU_WPR2_ADDR_LO_OFFSET, &lo);
-	read_bar(work, GU_WPR2_ADDR_HI_OFFSET, &hi);
-	dev_dbg(&work->pdev->dev, "WPR2 before restore: index=%zu attempt=%u lo=%#x hi=%#x\n",
-		 work->write_index, work->attempt, lo, hi);
-	dev_dbg(&work->pdev->dev,
-		 "WPR2 target: expected=%#x:%#x start=%#llx end=%#llx raw_before=%#x:%#x\n",
-		 work->frts_lo, work->frts_hi,
-		 (unsigned long long)((u64)(work->frts_lo >> 4) << 12),
-		 (unsigned long long)(((u64)(work->frts_hi >> 4) << 12) + GU_WPR2_ALIGN),
-		 work->frts_lo, work->frts_hi);
-	write_bar(work, GU_WPR2_ADDR_LO_OFFSET, work->frts_lo);
-	write_bar(work, GU_WPR2_ADDR_HI_OFFSET, work->frts_hi);
-	if (read_bar(work, GU_WPR2_ADDR_LO_OFFSET, &lo) || read_bar(work, GU_WPR2_ADDR_HI_OFFSET, &hi))
-		return GU_RESULT(-EIO);
-	{
-		u32 feat = 0, wpr_cfg = 0, wpr = 0, lock = 0;
-
-		read_bar(work, work->card->family->feat_plm, &feat);
-		read_bar(work, GU_WPR_CFG_PLM_OFFSET, &wpr_cfg);
-		read_bar(work, GU_WPR_PLM_OFFSET, &wpr);
-		read_bar(work, GU_MMU_LOCK_CFG_PLM_OFFSET, &lock);
-		dev_dbg(&work->pdev->dev,
-			 "WPR2 restored: lo=%#x hi=%#x expected=%#x:%#x plm feat=%#x wpr_cfg=%#x wpr=%#x lock=%#x\n",
-			 lo, hi, work->frts_lo, work->frts_hi, feat, wpr_cfg, wpr, lock);
-	}
-	return GU_RESULT(lo == work->frts_lo && hi == work->frts_hi ? 0 : -EIO);
-}
 static int table_failure(struct unlock_transaction_work *work, const char *phase,
 			 const struct gu_reg_write *entry, u32 observed, int ret)
 {
@@ -1209,29 +1297,62 @@ static int table_failure(struct unlock_transaction_work *work, const char *phase
 static int run_privileged_writes(struct unlock_transaction_work *work,
 				 const struct gu_write_table *table)
 {
-	const size_t per_launch = work->payload->writes;
+	const size_t per_launch = work->payload->writes - 1;
 	struct gu_reg_write batch[GU_PAYLOAD_MAX_WRITES];
+	u32 original[GU_PAYLOAD_MAX_WRITES];
 	size_t i, j, count;
 	u32 after = 0;
-	bool matched;
+	bool matched, continued = work->state == GU_ACTIVE;
 	int ret;
 
 	if (work->state != GU_PUBLISHED && work->state != GU_ACTIVE)
 		return GU_RESULT(-EPROTO);
+	if (work->payload->writes < 2 || work->payload->writes > ARRAY_SIZE(batch))
+		return GU_RESULT(-EINVAL);
 	if (!table->count)
 		return 0;
+	for (i = 0; i < table->count; i++) {
+		const struct gu_reg_write *write = &table->entries[i];
+
+		if (!write->check_mask)
+			return GU_RESULT(-EINVAL);
+		if ((u64)write->addr + 4 > work->bar_len)
+			return GU_RESULT(-ERANGE);
+	}
 	work->state = GU_ACTIVE;
 	for (i = 0; i < table->count; i += per_launch) {
-		const struct gu_reg_write *entry;
+		const struct gu_reg_write *entry, *failed = NULL;
+		bool final;
 
 		count = table->count - i;
 		if (count > per_launch)
 			count = per_launch;
+		final = i + count == table->count;
 		/* Repeat the last write of this launch to fill the payload's fixed
-		 * slot count. The recipe's final write must therefore be the value
-		 * the chain's unused slots already produce. */
-		for (j = 0; j < per_launch; j++)
-			batch[j] = table->entries[i + (j < count ? j : count - 1)];
+		 * slot count. The payload writes whole words, so a read-modify-write
+		 * takes its kept bits from the host's read before the launch. */
+		for (j = 0; j < per_launch; j++) {
+			u32 current_value = 0;
+
+			batch[j] = j < count ? table->entries[i + j] : batch[count - 1];
+			original[j] = 0;
+			if (batch[j].keep || batch[j].check_mask != ~0u) {
+				ret = read_bar(work, batch[j].addr, &current_value);
+				if (batch[j].keep && (ret || inaccessible(current_value)))
+					return table_failure(work, "prelaunch", &batch[j], 0, -ENODEV);
+				original[j] = current_value;
+			}
+			batch[j].value |= current_value & batch[j].keep;
+			batch[j].keep = 0;
+		}
+		/* FRTS is at WPR2's high end: Booter extends only LO. GA100
+		 * instead rebuilds its own range and needs HI cleared to restart.
+		 * The last launch leaves WPR2 down for the stock driver. */
+		batch[per_launch] = (struct gu_reg_write)
+			GU_WRITE(GU_WPR2_ADDR_HI_OFFSET, 0);
+		if (!final && work->card->family->frts)
+			batch[per_launch] = (struct gu_reg_write)
+				GU_WRITE(GU_WPR2_ADDR_LO_OFFSET, work->frts_lo);
 		entry = &batch[0];
 		matched = false;
 		work->write_index = i;
@@ -1245,21 +1366,15 @@ static int run_privileged_writes(struct unlock_transaction_work *work,
 			after = 0;
 			/* FWSEC completed before the first attempt. Every subsequent
 			 * refill requires the prior invocation to have stopped. */
-			if ((i || work->attempt > 1) && !work->invocation_halted)
+			if ((continued || i || work->attempt > 1) && !work->invocation_halted)
 				return table_failure(work, "prior-halt", entry, after, -EBUSY);
-			/* FWSEC already left WPR2 at the FRTS carve for the first
-			 * launch, and WPR_CFG is not open yet, so a host write here
-			 * would be a denied PLM access. Every later launch has
-			 * extended WPR2 and needs the carve restored. */
-			if (i || work->attempt > 1) {
-				ret = restore_frts(work);
-				if (ret)
-					return table_failure(work, "restore", entry, after, ret);
-			}
 			/* CPUCTL is diagnostic only: after FWSEC, GA102 SEC2 CPUCTL reads
 			 * 0xbadf5620 until the launch resets the engine. */
+			/* Optional literal openings can enable the host read itself.
+			 * A failed probe is diagnostic, not a prerequisite for issuing
+			 * their known values. RMW inputs were validated above. */
 			if (read_bar(work, entry->addr, &before) ||
-			    (before & 0xffff0000u) == 0xbadf0000u ||
+			    ((before & 0xffff0000u) == 0xbadf0000u && !entry->optional) ||
 			    read_bar(work, GU_SEC2_BASE + GU_FALCON_CPUCTL_OFFSET, &ctl) ||
 			    read_bar(work, GU_SEC2_BASE + GU_FALCON_ENGINE_OFFSET, &engine) || inaccessible(engine))
 				return table_failure(work, "prelaunch", entry, after, -ENODEV);
@@ -1271,7 +1386,7 @@ static int run_privileged_writes(struct unlock_transaction_work *work,
 				 i, table->count, count, work->attempt, entry->addr, entry->value,
 				 before, ctl, engine, st.reset_plm, lo, hi, st.fhstate);
 			ret = gu_payload_build(work->payload, work->buffer.cpu, batch,
-					       per_launch);
+					       per_launch + 1);
 			if (ret)
 				return table_failure(work, "payload", entry, after, ret);
 			put_le64((u8 *)work->meta.cpu + 72, work->buffer.dma);
@@ -1284,26 +1399,62 @@ static int run_privileged_writes(struct unlock_transaction_work *work,
 				 count, work->attempt, entry->addr, entry->value,
 				 work->attempt > 1 ? "retry" : "first");
 			ret = unlock_transaction_boot(work);
-			if (ret)
+			if (ret) {
+				for (j = 0; j < count; j++) {
+					u32 seen = 0;
+
+					if (!read_bar(work, batch[j].addr, &seen))
+						dev_err(&work->pdev->dev,
+							"post-failure batch entry %zu/%zu target=%#x submitted=%#x observed=%#x execution=unconfirmed\n",
+							i + j + 1, table->count, batch[j].addr,
+							batch[j].value, seen);
+				}
 				return table_failure(work, "completion", entry, after, ret);
-			if (read_bar(work, GU_WPR2_ADDR_LO_OFFSET, &lo) ||
-			    read_bar(work, GU_WPR2_ADDR_HI_OFFSET, &hi))
-				return table_failure(work, "result-inaccessible", entry, after, -ENODEV);
+			}
+			if (read_bar(work, GU_WPR2_ADDR_LO_OFFSET, &lo) || inaccessible(lo) ||
+			    read_bar(work, GU_WPR2_ADDR_HI_OFFSET, &hi) || inaccessible(hi))
+				return table_failure(work, "result-inaccessible",
+						     &batch[per_launch], 0, -ENODEV);
+			/* Do not launch again unless the tail restored the exact FRTS
+			 * pair, or disabled WPR2 with its positive LO left intact. */
+			if ((!final && work->card->family->frts) ?
+			    (lo != work->frts_lo || hi != work->frts_hi) :
+			    (hi != 0 || !(lo >> 4)))
+				return table_failure(work, "restore", &batch[per_launch],
+						     batch[per_launch].addr == GU_WPR2_ADDR_LO_OFFSET ? lo : hi,
+						     -EIO);
 			gu_read_boot_state(work, &st);
 			matched = true;
 			for (j = 0; j < count; j++) {
-				const struct gu_reg_write *written = &table->entries[i + j];
-				u32 expected = written->expect ? written->expect : written->value;
+				const struct gu_reg_write *written = &batch[j];
+				u32 expected = written->value;
+				u32 mask = written->check_mask;
 				u32 observed = 0;
+				bool readable;
 
-				if (read_bar(work, written->addr, &observed) ||
-				    (observed & 0xffff0000u) == 0xbadf0000u) {
+				readable = !read_bar(work, written->addr, &observed) &&
+					(observed & 0xffff0000u) != 0xbadf0000u &&
+					(mask == ~0u || observed != ~0u);
+				if (mask != ~0u)
+					dev_info(&work->pdev->dev,
+						 "gpu_unlock: privileged write target=%#x wrote=%#x before=%#x observed=%#x mask=%#x expected=%#x readable=%u matched=%u\n",
+						 written->addr, written->value, original[j], observed,
+						 mask, expected, readable, readable && (observed & mask) == (expected & mask));
+				if (!readable) {
+					if (written->optional) {
+						if (mask == ~0u)
+							dev_info(&work->pdev->dev,
+								 "gpu_unlock: optional privileged write %zu/%zu target=%#x wrote=%#x observed=%#x readable=0\n",
+								 i + j + 1, table->count, written->addr,
+								 written->value, observed);
+						continue;
+					}
 					work->target_addr = written->addr;
 					work->target_value = written->value;
 					return table_failure(work, "result-inaccessible",
 							     written, observed, -ENODEV);
 				}
-				if (observed != expected) {
+				if ((observed & mask) != (expected & mask)) {
 					if (written->optional) {
 						dev_info(&work->pdev->dev,
 							 "gpu_unlock: optional write %zu/%zu target=%#x wrote=%#x expected=%#x observed=%#x\n",
@@ -1313,13 +1464,14 @@ static int run_privileged_writes(struct unlock_transaction_work *work,
 					}
 					matched = false;
 					after = observed;
+					failed = written;
 					work->target_addr = written->addr;
 					work->target_value = written->value;
 					table_failure(work, "readback", written, observed, -EIO);
 					continue;
 				}
 				dev_info(&work->pdev->dev,
-					 "gpu_unlock: pass=%zu/%zu attempt=%u target=%#x value=%#x before=%#x after=%#x wpr2=%#x:%#x reset_plm=%#x mbox=%#x:%#x ret=0\n",
+					 "gpu_unlock: pass=%zu/%zu attempt=%u target=%#x value=%#x first_before=%#x after=%#x wpr2=%#x:%#x reset_plm=%#x mbox=%#x:%#x ret=0\n",
 					 i + j + 1, table->count, work->attempt, written->addr,
 					 written->value, before, observed, lo, hi,
 					 st.reset_plm, st.mailbox1, st.mailbox0);
@@ -1332,63 +1484,28 @@ static int run_privileged_writes(struct unlock_transaction_work *work,
 				 st.acr, st.csberr);
 			if (matched)
 				break;
-			/* Only literal idempotent PLMs belong here. A mismatching
+			/* ECC may have changed capacity, and the final tail tears down
+			 * FRTS. Neither kind of batch can be replayed. */
+			if (final || (work->ecc_enabled &&
+			    i + count > table->count - work->card->family->ecc->enabled.count -
+					work->card->privileged.count))
+				break;
+			/* Ordinary configuration is idempotent. A mismatching
 			 * readback after proven halt/cleanup may be retried once.
 			 * Errors/timeouts never replay an uncertain side effect. */
 		}
 		if (!matched)
 			return table_failure(work, "readback-exhausted",
-					     &table->entries[i + count - 1], after, -EIO);
+					     failed, after, -EIO);
 	}
-	ret = restore_frts(work);
-	return ret && table->count ?
-		table_failure(work, "final-FRTS", &table->entries[table->count - 1], after, ret) : ret;
-}
-
-/* Write the unlock value to one speed selector and read it back. */
-static int write_selector(struct unlock_transaction_work *work, const char *name,
-			  u32 offset, u32 unlock)
-{
-	u32 value;
-
-	if (read_bar(work, offset, &value) || inaccessible(value))
-		return GU_RESULT(-ENODEV);
-	dev_dbg(&work->pdev->dev, "selector read: %s=%#x expected_unlock=%#x\n",
-		 name, value, unlock);
-	dev_dbg(&work->pdev->dev, "selector write: %s=%#x\n", name, unlock);
-	write_bar(work, offset, unlock);
-	if (read_bar(work, offset, &value) || value == ~0u)
-		return GU_RESULT(-ENODEV);
-	return GU_RESULT(value == unlock ? 0 : -EIO);
+	return 0;
 }
 
 static int run_host_writes(struct unlock_transaction_work *work,
-			   const struct gu_write_table *table)
+			   const struct gu_write_table *table, const char *stage)
 {
-	size_t i;
-	for (i = 0; i < table->count; i++) {
-		const struct gu_reg_write *entry = &table->entries[i];
-		u32 observed = 0;
-		int ret;
-		work->write_index = i;
-		ret = write_selector(work, "host", entry->addr, entry->value);
-		if (ret) {
-			read_bar(work, entry->addr, &observed);
-			return table_failure(work, "host", entry, observed, ret);
-		}
-	}
-	{
-		u32 ss0 = 0, ss1 = 0, feat = 0, wpr_cfg = 0;
-
-		read_bar(work, work->card->family->feat_ss0, &ss0);
-		read_bar(work, work->card->family->feat_ss1, &ss1);
-		read_bar(work, work->card->family->feat_plm, &feat);
-		read_bar(work, GU_WPR_CFG_PLM_OFFSET, &wpr_cfg);
-		dev_info(&work->pdev->dev,
-			 "gpu_unlock: stage=host ss0=%#x ss1=%#x plm_feat=%#x plm_wpr_cfg=%#x\n",
-			 ss0, ss1, feat, wpr_cfg);
-	}
-	return 0;
+	return GU_RESULT(gu_host_writes(&work->pdev->dev, work->bar, work->bar_len,
+					table, stage));
 }
 
 /* PCI configuration can be ready before BAR0. The 610 BIF restore path waits
@@ -1460,33 +1577,133 @@ static int wait_post_flr_gfw(struct unlock_transaction_work *work)
 	return GU_RESULT(ret);
 }
 
-static int unlock_transaction_reset(struct unlock_transaction_work *work)
+/* Bus mastering off, and the chip still answering on BAR0. */
+static int stop_bus_master(struct unlock_transaction_work *work, u16 *command, u32 *chip)
 {
-	u32 identity, bar, lo, hi, ss0, ss1, plm, chip, cpuctl;
+	pci_clear_master(work->pdev);
+	work->master = false;
+	if (diag_pci_word(work, false, PCI_COMMAND, command) ||
+	    *command == 0xffff || (*command & PCI_COMMAND_MASTER))
+		return GU_RESULT(-EIO);
+	if (read_bar(work, GU_PMC_BOOT_0_OFFSET, chip) || !*chip || inaccessible(*chip))
+		return GU_RESULT(-ENODEV);
+	return 0;
+}
+
+/* Reset SEC2 so no Booter state or FBIF pointer into our buffers survives,
+ * then require no pending transactions and a halted GSP. */
+static int quiesce_falcons(struct unlock_transaction_work *work, const char *phase,
+			   u16 *pending, u32 *cpuctl)
+{
+	const struct gu_falcon_engine sec2 = sec2_engine(work);
+	struct gu_falcon_io io = falcon_io(work);
+	struct gu_falcon_evidence reset;
+	int ret;
+
+	ret = gu_falcon_engine_reset(&io, &sec2, phase, NULL, &reset);
+	if (ret)
+		return GU_RESULT(ret);
+	if (diag_pci_word(work, true, PCI_EXP_DEVSTA, pending) ||
+	    *pending == 0xffff || (*pending & PCI_EXP_DEVSTA_TRPND))
+		return GU_RESULT(-EBUSY);
+	if (read_bar(work, GU_GFW_CPUCTL_OFFSET, cpuctl) || inaccessible(*cpuctl) ||
+	    !(*cpuctl & GU_GFW_CPUCTL_HALTED))
+		return GU_RESULT(-ENODEV);
+	return 0;
+}
+
+/* Only the transaction owns the quiescence proof and recovery. */
+static int unlock_transaction_scrub(struct unlock_transaction_work *work)
+{
+	if (!work->ecc_enabled)
+		return 0;
+	if (work->state != GU_QUIESCED)
+		return GU_RESULT(-EPROTO);
+	return GU_RESULT(gu_ecc_scrub(&work->pdev->dev, work->bar, work->bar_len,
+				   work->memory.usable_bytes));
+}
+
+/* Hand over without FLR: BME off until the unwind frees our buffers, SEC2
+ * reset and GSP left halted by GFW. Then retrain the link, resize BAR1 and
+ * lock what an FLR would have reset. The link is retrained again after the
+ * stock driver's devinit, which is where the Gen2 policy can take; the card
+ * works at its current link speed until then. */
+static int unlock_transaction_handover(struct unlock_transaction_work *work)
+{
+	const struct gu_family *family = work->card->family;
+	u32 chip, cpuctl, lo, hi;
 	u16 command, pending;
-	unsigned int i;
 	int ret;
 
 	if (work->state != GU_STOCK)
 		return GU_RESULT(-EPROTO);
-	if (read_bar(work, work->card->family->feat_ss0, &ss0) || ss0 == ~0u ||
-	    read_bar(work, work->card->family->feat_ss1, &ss1) || ss1 == ~0u)
-		return GU_RESULT(-ENODEV);
-	dev_dbg(&work->pdev->dev, "pre-FLR selectors: ss0=%#x expected=%#x ss1=%#x expected=%#x\n",
-		ss0, GU_SS0_UNLOCK, ss1, GU_SS1_UNLOCK);
-	if (ss0 != GU_SS0_UNLOCK || ss1 != GU_SS1_UNLOCK)
+	ret = stop_bus_master(work, &command, &chip);
+	if (!ret)
+		ret = quiesce_falcons(work, "handover", &pending, &cpuctl);
+	if (ret)
+		return ret;
+	work->state = GU_QUIESCED;
+	if (work->ecc_enabled && family->vram == GU_VRAM_GDDR) {
+		ret = gu_vpr_prepare(work->bar, work->bar_len, &work->boot_vpr);
+		if (ret) {
+			dev_err(&work->pdev->dev, "gpu_unlock: boot VPR ownership rejected: %d\n", ret);
+			return GU_RESULT(ret);
+		}
+	}
+	ret = gu_memory_finalize(&work->pdev->dev, work->bar, work->bar_len,
+				 family, work->ecc_enabled, &work->memory);
+	if (ret) {
+		dev_err(&work->pdev->dev, "gpu_unlock: final memory configuration rejected: %d\n", ret);
+		return GU_RESULT(ret);
+	}
+	if (family->link_speed &&
+	    gu_pcie_relink(work->pdev, work->bar, work->bar_len, family))
+		dev_info(&work->pdev->dev, "gpu_unlock: link not retrained before the driver's pass; retried after it\n");
+	/* After resume BAR1 already has its window and nvidia is bound. */
+	if (!work->resume) {
+		ret = gu_pcie_bar1_resize(work->pdev, work->bar, work->bar_len, family);
+		if (ret)
+			return GU_RESULT(ret);
+	}
+	/* The final privileged write already disabled WPR2; handover only reads
+	 * it, even when Turing's shared MMU gate was opened for ECC bookkeeping. */
+	if (read_bar(work, GU_WPR2_ADDR_LO_OFFSET, &lo) || inaccessible(lo) ||
+	    read_bar(work, GU_WPR2_ADDR_HI_OFFSET, &hi) || hi || !(lo >> 4))
 		return GU_RESULT(-EIO);
-	pci_clear_master(work->pdev);
-	work->master = false;
-	if (diag_pci_word(work, false, PCI_COMMAND, &command) ||
-	    command == 0xffff || (command & PCI_COMMAND_MASTER))
-		return GU_RESULT(-EIO);
-	if (read_bar(work, GU_PMC_BOOT_0_OFFSET, &chip) || !chip || inaccessible(chip))
-		return GU_RESULT(-ENODEV);
+	ret = unlock_transaction_scrub(work);
+	if (!ret)
+		ret = gu_vpr_release(&work->pdev->dev, work->bar, work->bar_len, &work->boot_vpr);
+	if (!ret && work->ecc_enabled)
+		ret = run_host_writes(work, &family->ecc->handover, "ECC handover");
+	if (!ret)
+		ret = run_host_writes(work, &family->handover, "handover");
+	if (ret)
+		return ret;
+	dev_info(&work->pdev->dev,
+		 "gpu_unlock: stage=handover wpr2=%#x:%#x cmd=%#x devsta=%#x gsp_cpuctl=%#x chip=%#x\n",
+		 lo, hi, command, pending, cpuctl, chip);
+	if (work->card->chip == 0x170) {
+		gu_inforom_log_ga100(&work->pdev->dev, work->bar, work->bar_len, "handover");
+		gu_ecc_log(&work->pdev->dev, work->bar, work->bar_len, "handover");
+	}
+	return 0;
+}
+
+/* After a failure: FLR so devinit puts back what the unlock changed and the
+ * stock driver still starts from a clean, halted GSP. */
+static int unlock_transaction_flr(struct unlock_transaction_work *work)
+{
+	u32 identity, bar, lo, hi, chip, cpuctl;
+	u16 command, pending;
+	unsigned int i;
+	int ret;
+
+	ret = stop_bus_master(work, &command, &chip);
+	if (ret)
+		return ret;
 	/* Ampere PF-FLR requires no engine-reset preconditioning in this cold,
-	 * unbound path (no initialized NVLink/P2P). The pinned GA102 rejoin14
-	 * sequence also goes from the early PLM result to FLR. A pre-FLR engine
-	 * hold is not a prerequisite: secure firmware can reject that write.
+	 * unbound path (no initialized NVLink/P2P). A pre-FLR engine hold is
+	 * not a prerequisite: secure firmware can reject that write.
 	 * Keep EVERY allocation alive, BME off, until post-FLR containment.
 	 */
 	/* FLR resets the display engine, so a firmware framebuffer (simpledrm,
@@ -1532,28 +1749,12 @@ static int unlock_transaction_reset(struct unlock_transaction_work *work)
 	ret = wait_post_flr_gfw(work);
 	if (ret)
 		return GU_RESULT(ret);
-	{
-		struct gu_falcon_io io = falcon_io(work);
-		struct gu_falcon_evidence reset;
-		ret = gu_falcon_engine_reset(&io, GU_SEC2_BASE, "post-FLR", NULL, &reset);
-	}
+	ret = quiesce_falcons(work, "post-FLR", &pending, &cpuctl);
 	if (ret)
-		return GU_RESULT(ret);
-	if (diag_pci_word(work, true, PCI_EXP_DEVSTA, &pending) ||
-	    pending == 0xffff || (pending & PCI_EXP_DEVSTA_TRPND))
-		return GU_RESULT(-EBUSY);
-	if (read_bar(work, GU_GFW_CPUCTL_OFFSET, &cpuctl) || inaccessible(cpuctl) ||
-	    !(cpuctl & GU_GFW_CPUCTL_HALTED) ||
-	    read_bar(work, GU_WPR2_ADDR_LO_OFFSET, &lo) || inaccessible(lo) ||
-	    read_bar(work, GU_WPR2_ADDR_HI_OFFSET, &hi) || inaccessible(hi) ||
-	    read_bar(work, work->card->family->feat_ss0, &ss0) || inaccessible(ss0) ||
-	    read_bar(work, work->card->family->feat_ss1, &ss1) || inaccessible(ss1) ||
-	    read_bar(work, work->card->family->feat_plm, &plm) ||
-	    (plm & 0xffff0000u) == 0xbadf0000u)
+		return ret;
+	if (read_bar(work, GU_WPR2_ADDR_LO_OFFSET, &lo) || inaccessible(lo) ||
+	    read_bar(work, GU_WPR2_ADDR_HI_OFFSET, &hi) || inaccessible(hi))
 		return GU_RESULT(-ENODEV);
-	dev_dbg(&work->pdev->dev,
-		 "post-FLR SEC2 reset released, GSP halted, BME=0 pending=%u WPR2=%08x:%08x SS0=%08x SS1=%08x PLM=%08x CMD=%#x CHIP=%#x\n",
-		 pending, lo, hi, ss0, ss1, plm, command, chip);
 	/* Both 610 and installed 615 _kgspBootGspRm reject preexisting WPR2
 	 * on this cold dGPU path, even our old in-bounds FRTS reservation.
 	 * kgspIsWpr2Up_TU102 uses HI.VAL != 0, not a LO/HI range comparison.
@@ -1563,23 +1764,24 @@ static int unlock_transaction_reset(struct unlock_transaction_work *work)
 		return GU_RESULT(-EBUSY);
 	}
 	work->state = GU_QUIESCED;
-	if (ss0 != GU_SS0_UNLOCK || ss1 != GU_SS1_UNLOCK)
-		return GU_RESULT(-EIO);
 	dev_info(&work->pdev->dev,
-		 "gpu_unlock: stage=flr post_wpr2=%#x:%#x ss0=%#x ss1=%#x plm=%#x cmd=%#x devsta=%#x chip=%#x\n",
-		 lo, hi, ss0, ss1, plm, command, pending, chip);
+		 "gpu_unlock: stage=flr post_wpr2=%#x:%#x cmd=%#x devsta=%#x chip=%#x\n",
+		 lo, hi, command, pending, chip);
 	return 0;
 }
 
-int gpu_unlock_610_unlock(const struct gu_device *device, const struct gpu_unlock_610_shared *shared,
-			  bool resume)
+int gpu_unlock_run(const struct gu_device *device, const struct gpu_unlock_shared *shared,
+			  enum gu_unlock_mode mode)
 {
 	struct pci_dev *pdev = device->pdev;
 	struct unlock_transaction_work *work;
-	const struct gpu_unlock_610_firmware *assets;
-	const struct gpu_unlock_610_booter *booter;
+	const struct gpu_unlock_firmware *assets;
+	const struct gpu_unlock_booter *booter;
+	bool resume = mode != GU_UNLOCK_BOOT;
 	int ret, cleanup;
 
+	if (mode < GU_UNLOCK_BOOT || mode > GU_UNLOCK_RUNTIME_RESUME)
+		return -EINVAL;
 	if (!device->recipe || !device->recipe->family)
 		return -ENODEV;
 	work = kzalloc(sizeof(*work), GFP_KERNEL);
@@ -1587,8 +1789,8 @@ int gpu_unlock_610_unlock(const struct gu_device *device, const struct gpu_unloc
 		return -ENOMEM;
 	work->pdev = pci_dev_get(pdev);
 	work->card = device->recipe;
-	assets = gpu_unlock_610_bundle_find(shared, work->card->family->fw);
-	booter = gpu_unlock_610_booter_find(shared, work->card->family->booter);
+	assets = gpu_unlock_bundle_find(shared, work->card->family->fw);
+	booter = gpu_unlock_booter_find(shared, work->card->family->booter);
 	if (!assets || !assets->prepared || assets->error || !booter || !booter->fw ||
 	    !work->card->family->booter->payload ||
 	    gu_payload_check(work->card->family->booter->payload) ||
@@ -1602,14 +1804,19 @@ int gpu_unlock_610_unlock(const struct gu_device *device, const struct gpu_unloc
 	work->booter = booter;
 	work->payload = work->card->family->booter->payload;
 	work->loader_fw = work->card->family->loader ? shared->loader : NULL;
-	dev_dbg(&pdev->dev, "recipe selection: device=%#x family=%s payload=%s privileged=%zu host=%zu launch=%u\n",
+	dev_dbg(&pdev->dev, "recipe selection: device=%#x family=%s payload=%s privileged=%zu card_writes=%zu launch=%u\n",
 		 pdev->device, work->card->family->name, work->payload->name,
-		 work->card->family->privileged.count, work->card->family->host.count,
+		 work->card->family->privileged.count, work->card->privileged.count,
 		 work->card->family->booter->launch);
 	work->resume = resume;
 	/* After resume GFW may still be running: check and wait before reading
 	 * the layout. Firmware preparation has already completed for the round. */
-	ret = resume ? unlock_transaction_suspended(work) : 0;
+	ret = resume ? unlock_transaction_suspended(work, mode == GU_UNLOCK_RUNTIME_RESUME) : 0;
+	if (ret == 1) {
+		dev_dbg(&pdev->dev, "runtime resume: unlock retained; no firmware launched\n");
+		ret = 0;
+		goto out;
+	}
 	if (!ret && !resume)
 		ret = check_devres_empty(work, "entry");
 	if (!ret)
@@ -1620,12 +1827,6 @@ int gpu_unlock_610_unlock(const struct gu_device *device, const struct gpu_unloc
 		    ((chip >> 20) & 0x1ff) != work->card->chip)
 			ret = GU_RESULT(-ENODEV);
 	}
-	if (!ret) {
-		size_t i;
-		for (i = 0; i < work->card->family->privileged.count; i++)
-			if ((u64)work->card->family->privileged.entries[i].addr + 4 > work->bar_len)
-				ret = GU_RESULT(-ERANGE);
-	}
 	if (!ret)
 		ret = unlock_transaction_layout(work);
 	if (!ret)
@@ -1633,22 +1834,78 @@ int gpu_unlock_610_unlock(const struct gu_device *device, const struct gpu_unloc
 	if (!ret)
 		ret = unlock_transaction_gfw(work);
 	if (!ret)
+		ret = unlock_transaction_preos(work);
+	if (!ret && work->card->family->ecc) {
+		ret = gu_ecc_read_mode(&pdev->dev, work->bar, work->bar_len,
+				       work->card->family->ecc,
+				       &work->ecc_enabled);
+	}
+	if (!ret && mode == GU_UNLOCK_RUNTIME_RESUME && work->ecc_enabled) {
+		/* ECC initialization scrubs VRAM. Runtime suspend may retain live
+		 * allocations, so never run that initialization on runtime wake. */
+		dev_err(&pdev->dev, "gpu_unlock: runtime re-unlock with ECC enabled is unsupported\n");
+		ret = -EOPNOTSUPP;
+	}
+	if (!ret) {
+		ret = gu_recipe_prepare(work->card, work->ecc_enabled,
+					&work->prepared_writes, &work->privileged.count);
+		if (!ret)
+			work->privileged.entries = work->prepared_writes;
+	}
+	if (!ret) {
+		size_t i;
+
+		for (i = 0; i < work->privileged.count; i++) {
+			const struct gu_reg_write *write = &work->privileged.entries[i];
+
+			if (!write->check_mask)
+				ret = GU_RESULT(-EINVAL);
+			if ((u64)write->addr + 4 > work->bar_len)
+				ret = GU_RESULT(-ERANGE);
+		}
+	}
+	if (!ret)
 		ret = unlock_transaction_fwsec(work);
 	if (!ret)
 		ret = publish_signature(work);
 	if (!ret)
-		ret = run_privileged_writes(work, &work->card->family->privileged);
+		ret = run_privileged_writes(work, &work->privileged);
+	if (!ret && work->card->family->p2p)
+		ret = GU_RESULT(gu_pcie_p2p_check(pdev, work->bar, work->bar_len));
 	if (!ret)
 		ret = restore_stock_signature(work);
 	if (!ret)
-		ret = run_host_writes(work, &work->card->family->host);
-	if (!ret)
-		ret = unlock_transaction_reset(work);
-	/* Never leave the V67 signature published for a later stock boot. */
+		ret = unlock_transaction_handover(work);
+	/* Capture ROM while the transaction still enables PCI memory access.
+	 * Unwind restores the entry command, which may disable BAR0 decoding. */
+	if (!ret && !resume)
+		ret = gu_overrides_capture(device);
+out:
+	/* Never leave the write payload published for a later stock boot. */
 	if (ret && (work->state == GU_PUBLISHED || work->state == GU_ACTIVE))
 		restore_stock_signature(work);
+	/* The error stays the result even when the FLR cleans up. */
+	if (ret && work->firmware_started)
+		unlock_transaction_flr(work);
 	work->error_reported = false;
 	cleanup = unlock_transaction_unwind(work);
+	if (work->pci_save_attempted) {
+		int saved_ret;
+
+		/* Our BME-off FLR snapshot must not be replayed by pci_pm_resume().
+		 * Restore the previous software cache, without touching hardware. */
+		saved_ret = pci_load_and_free_saved_state(pdev, &work->previous_pci_state);
+		/* An uncontained engine must stay unable to DMA, including through
+		 * any pending PCI restore of the previous driver's configuration. */
+		if (work->retained)
+			pci_load_saved_state(pdev, NULL);
+		if (saved_ret) {
+			dev_err(&pdev->dev, "gpu_unlock: cannot restore PCI saved-state bookkeeping (%d)\n",
+				saved_ret);
+			if (!cleanup)
+				cleanup = GU_RESULT(saved_ret);
+		}
+	}
 	if (!ret)
 		ret = cleanup;
 	dev_info(&pdev->dev,
@@ -1663,6 +1920,7 @@ int gpu_unlock_610_unlock(const struct gu_device *device, const struct gpu_unloc
 		return ret;
 	}
 	pci_dev_put(work->pdev);
+	kfree(work->prepared_writes);
 	kfree(work);
 	return ret;
 }

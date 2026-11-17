@@ -1,37 +1,62 @@
-![gpu-unlock: full-speed tensor cores for GeForce RTX](assets/banner.svg)
+![gpu-unlock 3.0: full-speed tensor cores, PCIe P2P, ECC and more](assets/banner.svg)
 
 ### Your GeForce runs AI at half speed. This fixes it.
 
-![Version](https://img.shields.io/badge/version-2.0.0-76b900)![RTX 20 | 30 | 40](https://img.shields.io/badge/GeForce-RTX%2020%20%7C%2030%20%7C%2040-76b900?logo=nvidia&logoColor=white)![Linux](https://img.shields.io/badge/platform-Linux-informational?logo=linux&logoColor=white)![License GPL-2.0](https://img.shields.io/badge/license-GPL--2.0-blue)![Stars](https://img.shields.io/github/stars/Zagitta/gpu-unlock?style=flat&color=yellow)
+![Version](https://img.shields.io/badge/version-3.0.0-76b900) ![RTX 20 | 30 | 40](https://img.shields.io/badge/GeForce-RTX%2020%20%7C%2030%20%7C%2040-76b900?logo=nvidia&logoColor=white) ![CMP 170HX](https://img.shields.io/badge/CMP-170HX-76b900) ![Linux](https://img.shields.io/badge/platform-Linux-informational?logo=linux&logoColor=white) ![License GPL-2.0](https://img.shields.io/badge/license-GPL--2.0-blue) ![Stars](https://img.shields.io/github/stars/Zagitta/gpu-unlock?style=flat&color=yellow)
 
 **Up to 2× FP16 / BF16 / TF32 tensor throughput** · **+25–55% LLM prefill** · **+25–50% fine-tuning** · **+30–55% image generation**
 
-[Supported GPUs](#supported-gpus) · [Benchmarks](#what-you-get) · [Install](#how-to-install) · [FAQ](#faq) · [Support](#support-me)
+[New in 3.0.0](#new-in-30) · [Supported GPUs](#supported-gpus) · [Benchmarks](#what-you-get) · [Install](#how-to-install) · [FAQ](#faq) · [Support](#support-me)
 
 ---
 
-NVIDIA ships GeForce cards with their tensor cores capped to **half speed** for
-FP16, BF16 and TF32 math with FP32 accumulation, which is what nearly all AI
-training and unquantized inference uses. The same silicon sold as an RTX A-series
-or professional card runs at full rate. `gpu_unlock` removes that cap at boot,
-before the stock NVIDIA driver loads. No patched driver, no VBIOS flash, nothing
-to redo when NVIDIA releases a new driver.
+NVIDIA ships GeForce cards with their tensor cores capped to **half speed** for  
+FP16, BF16 and TF32 math with FP32 accumulation, which is what nearly all AI  
+training and unquantized inference uses. The same silicon sold as an RTX A-series  
+or professional card runs at full rate. `gpu_unlock` removes that cap at boot,  
+before the stock NVIDIA driver loads. No patched driver, no VBIOS flash, nothing  
+to redo when NVIDIA releases a new driver. 
+
+**Works with any nvidia driver since 2020!**
+
+---
+
+## New in 3.0.0
+
+Full-speed tensors were the start. **3.0.0 adds PCIe P2P, ECC, memory monitoring**  
+**and power management**, and brings the CMP 170HX into the fold.
+
+| Feature                     | What's new since 2.0                                                                                                                                                                                                                                                                                  |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **PCIe peer-to-peer (P2P)** | Native P2P unlock on supported Ampere and Ada GPUs.This uses the native P2P mailbox path in the nvidia driver and should work on more motherboards than patched P2P driver. This will help with tensor parallel LLM serving, still requires usual caveats like motherboard setup etc.                |
+| **CMP 170HX support**       | All unlocks from [cmpunlocker](https://github.com/amoghmunikote/cmpunlocker) 🚀                                                                                                                                                                                                                       |
+| **ECC support**             | ECC for those who want it on Ampere and Ada GPUs. Eats valuable VRAM + bandwidth on GDDR based GPUs, free on CMP. Enabling/disabling managed via `nvidia-smi` exactly as on professional cards. Requires inforom patching before it becomes available. **PSA: Untested on anything except 3090+CMP** |
+| **VRAM temperatures**       | GDDR chip and HBM stack temperatures, plus the hottest reading, exposed through standard Linux hwmon. Enabled by default, even on supported cards you haven't selected for unlocking.                                                                                                                 |
+| **HBM power management**    | From 40w to ~23w idle for CMP 170HX/A100.An activity-based governor lowers the HBM clock while idle and restores it under load. Boot-generated P8 overrides also enable lower idle core clocks.                                                                                                      |
+
+
 
 ---
 
 ## Supported GPUs
 
-| Generation                | Cards                                                                                                                  | Status                    |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------- |
-| **Ampere** (RTX 30)       | RTX 3050, 3060, 3060 Ti, 3070, 3070 Ti, 3080, 3080 Ti, 3090, 3090 Ti, plus RTX 3070/3080 Laptop GPUs                   | Stable, 100+ user reports |
-| **Ada Lovelace** (RTX 40) | RTX 4060, 4060 Ti, 4070, 4070 SUPER, 4070 Ti, 4070 Ti SUPER, 4080, 4080 SUPER, 4090, 4090 D, RTX 4050/4060 Laptop GPUs | Experimental              |
-| **Turing** (RTX 20)       | RTX 2060, 2060 SUPER, 2070, 2070 SUPER, 2080, 2080 SUPER, 2080 Ti, Titan RTX                                           | Experimental              |
-| Blackwell (RTX 50)        |                                                                                                                        | Not supported             |
+| Generation                | Cards                                                                                                                  | Status                                |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| **Ampere** (RTX 30)       | RTX 3050, 3060, 3060 Ti, 3070, 3070 Ti, 3080, 3080 Ti, 3090, 3090 Ti, plus RTX 3070/3080 Laptop GPUs                   | Stable, 100+ user reports             |
+| **Ada Lovelace** (RTX 40) | RTX 4060, 4060 Ti, 4070, 4070 SUPER, 4070 Ti, 4070 Ti SUPER, 4080, 4080 SUPER, 4090, 4090 D, RTX 4050/4060 Laptop GPUs | Stable, +50 user reports              |
+| **Turing** (RTX 20)       | RTX 2060, 2060 SUPER, 2070, 2070 SUPER, 2080, 2080 SUPER, 2080 Ti, Titan RTX                                           | Experimental (Should be fixed in 3.0) |
+| **Ampere** (GA100)        | CMP 170HX 8 GB and 10 GB                                                                                               | Stable                                |
+| Blackwell (RTX 50)        |                                                                                                                        | Not supported                         |
 
-Laptops only stay unlocked if the dedicated GPU is never fully powered off.  
-Many laptops power it down when idle, which silently resets the unlock. Turning  
-off runtime power management with `options nvidia NVreg_DynamicPowerManagement=0x00`
-in `/etc/modprobe.d/` helps on some models, but expect mixed results.
+Laptop runtime power management can fully power off the dedicated GPU when idle,
+which resets the unlock. The system-suspend recovery in 3.0 does not cover this
+idle power-off path. Turning off runtime power management with
+`options nvidia NVreg_DynamicPowerManagement=0x00` in `/etc/modprobe.d/` helps on
+some models, but expect mixed results.
+
+Feature availability varies by GPU: P2P enablement targets Ampere and Ada, HBM
+power management targets the CMP 170HX, and ECC needs InfoROM provisioning.
+The GeForce throughput numbers below describe the tensor-rate unlock.
 
 The exact PCI device IDs are in [`kernel/gpu_unlock/recipes.c`](kernel/gpu_unlock/recipes.c).
 Linux only. For Windows see the [FAQ](#faq).
@@ -78,11 +103,17 @@ Real workloads:
 
 Outputs are bit-identical before and after; only the speed changes. These
 numbers come from the [compatibility reports](https://github.com/Zagitta/gpu-unlock/issues)
-users have filed, where you can find full benchmark details and post your own.
+users have filed. Post working unlocks and benchmark numbers in the
+[success reports discussion](https://github.com/Zagitta/gpu-unlock/discussions/238).
+For a failed unlock, no speedup, or an unlock lost later, search existing issues
+first and comment on a match; otherwise use the unlock failure issue form and
+fill in all requested details.
 
 ---
 
 ## How to install
+
+### Arch, Debian/Ubuntu and Fedora/RHEL
 
 First run:
 
@@ -106,6 +137,42 @@ in `/etc/default/grub`, then run `sudo update-grub`.
 - **UKI / generated entries:** add it to `/etc/kernel/cmdline` and regenerate
 your boot images/entries (e.g. `sudo mkinitcpio -P` for mkinitcpio UKIs).
 
+**Reboot**, then [check the kernel log](#boot-flow-and-opt-in) for the result.
+Upgrading from 2.0? Run `git pull` and `make install`, keep your existing
+`gpu_unlock.targets=` setting, and reboot.
+
+### Unraid 7.3 and later
+
+In **Plugins → Install Plugin**, use:
+
+```text
+https://github.com/Zagitta/gpu-unlock/releases/download/unraid/gpu-unlock.plg
+```
+
+The plugin selects the package for your running kernel, caches generated firmware
+on the flash drive, and defaults to unlocking all supported cards. Reboot if
+NVIDIA is already loaded. See the [plugin source](packaging/unraid/gpu-unlock.plg)
+for its persistent `TARGETS` configuration.
+
+## Memory monitoring and ECC
+
+VRAM temperatures appear under the `vram` hwmon device in tools such as
+`sensors`, once NVIDIA has initialized the memory controllers. Readings include
+individual GDDR chips or HBM stacks and a **Hottest** channel. Add
+`gpu_unlock.vram_temps=0` to the kernel command line to disable monitoring.
+
+ECC is separate from the tensor unlock and is not enabled automatically by
+installing 3.0. The module reads the card's ECC request from InfoROM, initializes
+ECC and scrubs memory when requested, then supplies the stock NVIDIA driver with
+VBIOS overrides generated from that GPU's own ROM at boot. These overrides do
+not flash the VBIOS.
+
+For supported Ampere and Ada cards missing the required InfoROM objects,
+[`tools/patch_inforom.py`](tools/patch_inforom.py) provides backup, offline patch,
+dry-run and verified apply modes. This is a separate, persistent InfoROM write
+using NVFlash; **it requires the GPU to be unbound and NVIDIA modules unloaded**.
+Run `python3 tools/patch_inforom.py --help` for the available modes.
+
 # FAQ
 
 - Q: Do you have a website/coin/installer?  
@@ -113,7 +180,7 @@ A: No this is the one and only OG source for gpu-unlock. Crypto, websites, insta
 - Q: Does this depend on a specific driver version? I see `610.43.03` is pinned.  
 A: No the driver is only fetched to extract firmware this unlock depends on    
 - Q: What about Windows?  
-A: I don't run windows and don't plan to maintain it but [https://github.com/impacifist/Windows-GPU-UNLOCK](https://github.com/impacifist/Windows-GPU-UNLOCK) has built a port, YMMV.   
+A: I don't run windows and don't plan to maintain it but [https://github.com/impacifist/Windows-GPU-UNLOCK](https://github.com/impacifist/Windows-GPU-UNLOCK) has built a port, YMMV.  
 There are windows installer's floating around but I would recommend being ++**very**++ careful with those.
 - Q: What about Blackwell (RTX 50)?  
 A: Not supported and unlikely to happen.    
@@ -154,7 +221,7 @@ contain no NVIDIA archives or generated firmware.
 
 ## How it works
 
-This Linux kernel module combines the cmpunlocker's V67/PLM technique with the
+This Linux kernel module combines the cmpunlocker's PLM technique with the
 pre-driver timing of the UEFI approach. At boot it runs the unlock, writes the
 speed selectors (SS0 `0x88888888`, which selects the full BF16 rate, and the
 4-bit SS1 `0x8` IMLA4) and performs an FLR before the unmodified NVIDIA driver
@@ -211,14 +278,14 @@ over.
 Loading the module by hand after boot does nothing to a card that `nvidia`
 has bound.
 
-Suspend to RAM powers the cards off, which resets the speed selectors. After
-resume the module unlocks every card it unlocked at boot again, before
-`nvidia` resumes it: its suspend notifier runs just ahead of the one `nvidia`
-resumes its cards from (`NVreg_UseKernelSuspendNotifiers=1`, the default in
-current drivers; `nvidia-resume.service` runs later still). This adds about a
+Suspend to RAM powers the cards off, which resets the speed selectors. In 3.0,
+the module restores the unlock during the device's `resume_noirq` phase, after
+the parent PCI device has restored its configuration and before NVIDIA resumes
+the GPU. Firmware is prepared before suspend, and the hardware work finishes
+before device interrupts are enabled and userspace thaws. This adds about a
 second to resume. A card that kept power, as in suspend to idle, is still
-unlocked and is only read. A card that `nvidia` has already resumed, or that is
-bound to another driver, is left as it is, and the log says why. Add
+unlocked and is only read. Cards bound to another driver are left as they are.
+CMP 170HX link retraining runs after NVIDIA has initialized the card. Add
 `gpu_unlock.resume=0` to the kernel command line, or write `0` to
 `/sys/module/gpu_unlock/parameters/resume`, to turn this off. Hibernation is
 not covered.

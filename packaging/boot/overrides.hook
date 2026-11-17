@@ -1,0 +1,5 @@
+#!/usr/bin/ash
+# SPDX-License-Identifier: GPL-2.0-only
+run_earlyhook() {
+    /usr/lib/gpu-unlock/prepare-overrides
+}

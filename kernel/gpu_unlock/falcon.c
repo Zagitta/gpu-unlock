@@ -7,7 +7,7 @@
 #include <linux/timekeeping.h>
 
 #include "falcon.h"
-#include "prep_610.h"
+#include "prep.h"
 #include "registers.h"
 
 static int falcon_read(const struct gu_falcon_io *io, u32 offset, u32 *value)
@@ -58,11 +58,12 @@ int gu_falcon_poll(const struct gu_falcon_io *io, u32 offset, u32 mask, u32 expe
 	}
 }
 
-int gu_falcon_engine_reset(const struct gu_falcon_io *io, u32 base,
+int gu_falcon_engine_reset(const struct gu_falcon_io *io, const struct gu_falcon_engine *eng,
 			   const char *phase, u32 *hwcfg_out,
 			   struct gu_falcon_evidence *evidence)
 {
 	unsigned int j;
+	u32 base = eng->base;
 	u32 engine, before, first = 0, hwcfg, last = 0;
 	int ret;
 
@@ -112,10 +113,18 @@ int gu_falcon_engine_reset(const struct gu_falcon_io *io, u32 base,
 	if (ret)
 		return ret;
 	evidence->reset_released = true;
-	/* FALCON_HWCFG2 bit 12 clears when memory scrubbing finishes.
-	 * A PRI error fails this wait instead of being handed to RM.
+	/* After a CPU reset IMEM and DMEM must finish scrubbing before code is
+	 * loaded, otherwise the scrubber clears the fresh image. Turing and
+	 * GA100 report this in DMACTL (DMEM_SCRUBBING, IMEM_SCRUBBING); GA10x
+	 * and AD10x report it in HWCFG2.MEM_SCRUBBING. A PRI error fails this
+	 * wait instead of being handed to RM.
 	 */
-	ret = gu_falcon_poll(io, base + GU_FALCON_HWCFG2_OFFSET, 1u << 12, 0, 1000000, true, NULL);
+	if (eng->dmactl_scrub)
+		ret = gu_falcon_poll(io, base + GU_FALCON_DMACTL_OFFSET, 6u, 0,
+				     1000000, true, NULL);
+	else
+		ret = gu_falcon_poll(io, base + GU_FALCON_HWCFG2_OFFSET, 1u << 12, 0,
+				     1000000, true, NULL);
 	if (ret)
 		return ret;
 	if (falcon_read(io, base + GU_FALCON_HWCFG2_OFFSET, &hwcfg) || inaccessible(hwcfg))
@@ -142,7 +151,7 @@ int gu_falcon_reset(const struct gu_falcon_io *io, const struct gu_falcon_engine
 		return ret;
 	if (ret)
 		dev_dbg(io->dev, "Falcon pre-reset timeout tolerated per HW bug 3419321\n");
-	ret = gu_falcon_engine_reset(io, eng->base, "pre-launch", &hwcfg, evidence);
+	ret = gu_falcon_engine_reset(io, eng, "pre-launch", &hwcfg, evidence);
 	if (ret)
 		return ret;
 	if (hwcfg & (1u << 10)) {
@@ -307,7 +316,8 @@ int gu_falcon_loader(const struct gu_falcon_io *io, const struct gu_falcon_engin
 	ret = gu_falcon_reset(io, eng, evidence);
 	if (ret)
 		return ret;
-	if (falcon_read(io, eng->base + GU_FALCON_CPUCTL_OFFSET, &ctl) || inaccessible(ctl) || (ctl & 16) ||
+	/* TU10x GSP can remain HALTED after reset; validate the fresh launch. */
+	if (falcon_read(io, eng->base + GU_FALCON_CPUCTL_OFFSET, &ctl) || inaccessible(ctl) ||
 	    falcon_read(io, eng->base + GU_FALCON_HWCFG_OFFSET, &hwcfg) || inaccessible(hwcfg) ||
 	    falcon_read(io, eng->base + GU_FALCON_DMACTL_OFFSET, &trans) || inaccessible(trans))
 		return -ENODEV;
@@ -315,6 +325,11 @@ int gu_falcon_loader(const struct gu_falcon_io *io, const struct gu_falcon_engin
 		return -ERANGE;
 	dst = ((hwcfg & 0x1ff) - 2) << 8;
 	falcon_write(io, eng->base + GU_FALCON_DMACTL_OFFSET, trans & ~1u);
+	/* The generic loader fetches code through FBIF; enable the DMA path
+	 * before it starts (the HS loader does the same on GA10x). */
+	if (falcon_read(io, eng->fbif + GU_FBIF_CTL_OFFSET, &trans) || inaccessible(trans))
+		return -ENODEV;
+	falcon_write(io, eng->fbif + GU_FBIF_CTL_OFFSET, trans | (1u << 7));
 	if (falcon_read(io, eng->fbif + GU_FBIF_TRANSCFG(4), &trans) || inaccessible(trans))
 		return -ENODEV;
 	falcon_write(io, eng->fbif + GU_FBIF_TRANSCFG(4), (trans & ~7u) | 5u);
@@ -380,9 +395,8 @@ int gu_falcon_direct(const struct gu_falcon_io *io, const struct gu_falcon_engin
 	ret = gu_falcon_reset(io, eng, evidence);
 	if (ret)
 		return ret;
-	ret = gu_falcon_poll(io, eng->base + GU_FALCON_CPUCTL_OFFSET, 16, 0, 1000, true, NULL);
-	if (ret)
-		return ret;
+	/* GA100 SEC2 can retain HALTED after reset. Upload and STARTCPU are
+	 * still required; the caller verifies fresh launch and payload results. */
 	/* REQUIRE_CTX=false, matching kflcnDisableCtxReq. */
 	if (falcon_read(io, eng->base + GU_FALCON_DMACTL_OFFSET, &ctl) || inaccessible(ctl))
 		return -ENODEV;

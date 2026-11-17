@@ -7,7 +7,7 @@
 # For a published release, point the first source at the tagged tarball.
 pkgbase=gpu-unlock
 pkgname=(gpu-unlock-dkms gpu-unlock-firmware)
-pkgver=2.0.0
+pkgver=3.0.0
 pkgrel=1
 _nv=610.43.03
 _installer=NVIDIA-Linux-x86_64-$_nv-no-compat32.run
@@ -44,7 +44,7 @@ build() {
 
 package_gpu-unlock-dkms() {
   arch=('any')
-  depends=('dkms' "gpu-unlock-firmware=$pkgver-$pkgrel")
+  depends=('dkms' 'kmod' "gpu-unlock-firmware=$pkgver-$pkgrel")
   backup=('etc/mkinitcpio.conf.d/zz-gpu-unlock.conf')
   conflicts=('gpu-unlock-mkinitcpio')
   replaces=('gpu-unlock-mkinitcpio')

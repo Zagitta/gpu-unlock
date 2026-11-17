@@ -6,7 +6,7 @@ license, and `extract_boot_assets.py` for the signed SEC2 Booter bundles,
 generic Falcon loader, and per-family GSP boot images/descriptors.
 Extracted NVIDIA bytes are unchanged.
 
-The payload is ordinary source code: the V67 call table in
+The payload is ordinary source code: the call table in
 `kernel/gpu_unlock/recipes.c`, built per write by `payload.c`. There is no
 generator, no external `dmem.bin` override, and no reference image on disk.
 
