@@ -23,7 +23,7 @@ struct override {
 	struct pci_dev *pdev;
 	struct bin_attribute attr;
 	u8 index;
-	char name[sizeof("0000:00:00.0-00.bin")];
+	char name[sizeof("ffffffff-FF")];
 	u8 data[];
 };
 
@@ -40,7 +40,7 @@ static int override_notify(struct notifier_block *nb, unsigned long event, void 
 	struct device *dev = data;
 	struct override *record;
 	struct pci_dev *pdev;
-	char *argv[] = { "/usr/lib/gpu-unlock/apply-procfs-override", NULL, NULL };
+	char *argv[] = { "/usr/lib/gpu-unlock/apply-procfs-override", NULL, NULL, NULL };
 	char *env[] = { "HOME=/", "PATH=/usr/sbin:/usr/bin:/sbin:/bin", NULL };
 	int ret;
 
@@ -60,6 +60,7 @@ static int override_notify(struct notifier_block *nb, unsigned long event, void 
 		 * that adapter initialization is deferred before writing procfs.
 		 * Never take the already-held PCI lock or load modules here. */
 		argv[1] = (char *)pci_name(pdev);
+		argv[2] = record->name;
 		ret = call_usermodehelper(argv[0], argv, env, UMH_WAIT_PROC);
 		/* UMH_WAIT_PROC returns the child's wait status. */
 		if (ret == (10 << 8))
@@ -127,10 +128,6 @@ static int add_override(struct list_head *head, struct pci_dev *pdev,
 		return -ENOMEM;
 	record->pdev = pci_dev_get(pdev);
 	record->index = index;
-	if (!index)
-		snprintf(record->name, sizeof(record->name), "%s.bin", pci_name(pdev));
-	else
-		snprintf(record->name, sizeof(record->name), "%s-%02X.bin", pci_name(pdev), index);
 	memcpy(record->data, data, size);
 	init_binary(&record->attr, record->name, record->data, size);
 	list_add_tail(&record->node, head);
@@ -250,6 +247,7 @@ int gu_overrides_publish(void)
 {
 	struct override *record;
 	struct pci_dev *previous = NULL;
+	unsigned int bundle = 0;
 	size_t size = 1, used = 0;
 	int ret;
 
@@ -263,9 +261,13 @@ int gu_overrides_publish(void)
 			"options nvidia NVreg_RegistryBinaryFilePerDevice=\"");
 		list_for_each_entry(record, &records, node) {
 			if (record->pdev != previous) {
+				if (previous)
+					bundle++;
 				used += scnprintf(config + used, size - used, "pci=%s;", pci_name(record->pdev));
 				previous = record->pdev;
 			}
+			/* Capture completes in parallel; assign names to the final bundles. */
+			snprintf(record->name, sizeof(record->name), "%x-%02X", bundle, record->index);
 			used += scnprintf(config + used, size - used,
 				"romOverride%02X=gpu-unlock/%s;", record->index, record->name);
 		}

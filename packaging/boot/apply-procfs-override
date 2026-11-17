@@ -1,12 +1,16 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-2.0-only
 set -eu
-[ "$#" = 1 ] || exit 2
+[ "$#" = 2 ] || exit 2
 bdf=$1
+bundle=${2%-*}
 case "$bdf" in
     *[!0123456789abcdefABCDEF:.]*|'') exit 2 ;;
 esac
 case "$bdf" in ????:??:??.[0-7]) ;; *) exit 2 ;; esac
+case "$bundle" in
+    *[!0123456789abcdefABCDEF]*|'') exit 2 ;;
+esac
 directory=/sys/kernel/gpu_unlock/overrides
 registry=/proc/driver/nvidia/gpus/$bdf/registry
 params=/proc/driver/nvidia/params
@@ -20,7 +24,7 @@ message() {
 }
 
 found=0
-for record in "$directory/$bdf.bin" "$directory/$bdf"-[0-9A-F][0-9A-F].bin; do
+for record in "$directory/$bundle"-[0-9A-F][0-9A-F]; do
     [ ! -r "$record" ] || found=1
 done
 [ "$found" = 1 ] || exit 0
@@ -45,14 +49,9 @@ if grep -q '^GpuInitOnProbe:' "$params" &&
 fi
 # NVIDIA buffers the raw binary value and commits it on final close.
 # A successful write alone does not prove that RM accepted the key.
-for record in "$directory/$bdf.bin" "$directory/$bdf"-[0-9A-F][0-9A-F].bin; do
+for record in "$directory/$bundle"-[0-9A-F][0-9A-F]; do
     [ -r "$record" ] || continue
-    index=00
-    if [ "$record" != "$directory/$bdf.bin" ]; then
-        index=${record##*/}
-        index=${index#"$bdf"-}
-        index=${index%.bin}
-    fi
+    index=${record##*-}
     key=romOverride$index
     { printf '%s=' "$key"; cat "$record"; } > "$registry"
     if ! grep -q "$key" "$registry"; then

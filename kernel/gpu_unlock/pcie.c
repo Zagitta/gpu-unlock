@@ -7,6 +7,7 @@
  * nv_resize_pcie_bars.
  */
 #include <linux/delay.h>
+#include <linux/mutex.h>
 #include <linux/pci.h>
 #include <linux/timekeeping.h>
 
@@ -250,10 +251,14 @@ int gu_pcie_relink(struct pci_dev *pdev, void __iomem *bar, resource_size_t len,
 #define GU_BAR1 1
 #define GU_BAR3 3
 
+static DEFINE_MUTEX(bar1_lock);
+static const unsigned int resize_bars[] = { GU_BAR1, GU_BAR3 };
+
 static int resize_bar1(struct pci_dev *pdev, int size)
 {
 #ifdef GU_RESIZE_EXCLUDE_BARS
-	return pci_resize_resource(pdev, GU_BAR1, size, 0);
+	/* BAR0 is mapped by the unlock transaction and must not move. */
+	return pci_resize_resource(pdev, GU_BAR1, size, BIT(0));
 #else
 	return pci_resize_resource(pdev, GU_BAR1, size);
 #endif
@@ -261,53 +266,196 @@ static int resize_bar1(struct pci_dev *pdev, int size)
 
 static bool bars_assigned(struct pci_dev *pdev)
 {
-	return !(pci_resource_flags(pdev, GU_BAR1) & IORESOURCE_UNSET) &&
-	       !(pci_resource_flags(pdev, GU_BAR3) & IORESOURCE_UNSET);
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(resize_bars); i++) {
+		unsigned int bar = resize_bars[i];
+		struct resource *res = &pdev->resource[bar];
+
+		if (!(res->flags & IORESOURCE_MEM) ||
+		    (res->flags & (IORESOURCE_UNSET | IORESOURCE_DISABLED)) ||
+		    !res->parent || !res->start || res->end < res->start ||
+		    !pci_resource_len(pdev, bar))
+			return false;
+	}
+	return true;
+}
+
+static int bar1_control(struct pci_dev *pdev)
+{
+	int pos = pci_find_ext_capability(pdev, PCI_EXT_CAP_ID_REBAR);
+	unsigned int i, count;
+	u32 ctrl;
+	int ret;
+
+	if (!pos)
+		return -ENODEV;
+	ret = pci_read_config_dword(pdev, pos + PCI_REBAR_CTRL, &ctrl);
+	if (ret)
+		return pcibios_err_to_errno(ret);
+	count = (ctrl & PCI_REBAR_CTRL_NBAR_MASK) >> PCI_REBAR_CTRL_NBAR_SHIFT;
+	for (i = 0; i < count; i++, pos += 8) {
+		ret = pci_read_config_dword(pdev, pos + PCI_REBAR_CTRL, &ctrl);
+		if (ret)
+			return pcibios_err_to_errno(ret);
+		if ((ctrl & PCI_REBAR_CTRL_BAR_IDX) == GU_BAR1)
+			return pos + PCI_REBAR_CTRL;
+	}
+	return -ENOENT;
+}
+
+/* The unlock changes the decoder before Linux can allocate its new window.
+ * Restore the old size so failed PCI resize attempts roll back to that size. */
+static int set_bar1_size(struct pci_dev *pdev, int control, int size)
+{
+	u32 ctrl, observed;
+	int ret;
+
+	ret = pci_read_config_dword(pdev, control, &ctrl);
+	if (ret)
+		return pcibios_err_to_errno(ret);
+	ctrl = (ctrl & ~PCI_REBAR_CTRL_BAR_SIZE) | (size << PCI_REBAR_CTRL_BAR_SHIFT);
+	ret = pci_write_config_dword(pdev, control, ctrl);
+	if (!ret)
+		ret = pci_read_config_dword(pdev, control, &observed);
+	if (ret)
+		return pcibios_err_to_errno(ret);
+	return (observed & PCI_REBAR_CTRL_BAR_SIZE) ==
+	       (ctrl & PCI_REBAR_CTRL_BAR_SIZE) ? 0 : -EIO;
+}
+
+static int restore_bars(struct pci_dev *pdev, int control, int size,
+			const struct resource *saved)
+{
+	unsigned int i;
+	int ret;
+
+	ret = set_bar1_size(pdev, control, size);
+	if (ret)
+		return ret;
+	for (i = 0; i < ARRAY_SIZE(resize_bars); i++) {
+		pci_release_resource(pdev, resize_bars[i]);
+		if (pdev->resource[resize_bars[i]].parent)
+			return -EBUSY;
+	}
+	/* Allocation failure may clear flags as well as the address and size.
+	 * Restore only the geometry, never stale resource-tree links. */
+	for (i = 0; i < ARRAY_SIZE(resize_bars); i++) {
+		struct resource *res = &pdev->resource[resize_bars[i]];
+
+		res->start = saved[i].start;
+		res->end = saved[i].end;
+		res->flags = saved[i].flags;
+	}
+	for (i = 0; i < ARRAY_SIZE(resize_bars); i++) {
+		unsigned int bar = resize_bars[i], j;
+		struct resource *res = &pdev->resource[bar];
+		u64 address;
+
+		ret = pci_claim_resource(pdev, bar);
+		if (ret)
+			return ret;
+		/* pci_update_resource() is not exported to modules. */
+		address = pci_bus_address(pdev, bar) | (res->flags & ~PCI_BASE_ADDRESS_MEM_MASK);
+		for (j = 0; j < (res->flags & IORESOURCE_MEM_64 ? 2 : 1); j++) {
+			int reg = PCI_BASE_ADDRESS_0 + (bar + j) * 4;
+			u32 value = address >> (j * 32), observed;
+
+			ret = pci_write_config_dword(pdev, reg, value);
+			if (!ret)
+				ret = pci_read_config_dword(pdev, reg, &observed);
+			if (ret)
+				return pcibios_err_to_errno(ret);
+			if (observed != value)
+				return -EIO;
+			pdev->saved_config_space[reg / 4] = value;
+		}
+	}
+	return bars_assigned(pdev) ? 0 : -ENODEV;
 }
 
 int gu_pcie_bar1_resize(struct pci_dev *pdev, void __iomem *bar, resource_size_t len,
 			const struct gu_family *family)
 {
-	int old = pci_rebar_bytes_to_size(pci_resource_len(pdev, GU_BAR1));
-	int size, ret;
+	struct resource saved[ARRAY_SIZE(resize_bars)];
+	int old, control, size, ret = 0, error;
+	unsigned int i;
 	u64 sizes;
 	u16 cmd;
 
 	if (!family->bar1.count)
 		return 0;
+	/* Different cards can resize the same upstream bridge windows. */
+	mutex_lock(&bar1_lock);
 	if (pci_find_host_bridge(pdev->bus)->preserve_config ||
 	    !pci_rebar_get_possible_sizes(pdev, GU_BAR1)) {
 		pci_info(pdev, "gpu_unlock: BAR1 cannot be resized here, left locked\n");
-		return 0;
+		goto out;
+	}
+	if (!bars_assigned(pdev)) {
+		ret = -ENODEV;
+		goto out;
+	}
+	old = pci_rebar_bytes_to_size(pci_resource_len(pdev, GU_BAR1));
+	control = bar1_control(pdev);
+	if (control < 0) {
+		ret = control;
+		goto out;
+	}
+	for (i = 0; i < ARRAY_SIZE(resize_bars); i++)
+		saved[i] = pdev->resource[resize_bars[i]];
+	ret = pci_read_config_word(pdev, PCI_COMMAND, &cmd);
+	if (ret) {
+		ret = pcibios_err_to_errno(ret);
+		goto out;
 	}
 	ret = gu_host_writes(&pdev->dev, bar, len, &family->bar1, "bar1");
 	if (ret)
-		return ret;
+		goto out;
 	sizes = pci_rebar_get_possible_sizes(pdev, GU_BAR1);
 
 	/* The kernel requires memory decoding off while BARs move. */
-	pci_read_config_word(pdev, PCI_COMMAND, &cmd);
-	pci_write_config_word(pdev, PCI_COMMAND, cmd & ~PCI_COMMAND_MEMORY);
-	pci_release_resource(pdev, GU_BAR1);
-	pci_release_resource(pdev, GU_BAR3);
-	for (size = fls64(sizes) - 1; size > old; size--)
-		if ((sizes & BIT_ULL(size)) && !resize_bar1(pdev, size))
-			break;
-	/* Nothing larger fits: the decoder must still return to the old size. */
-	ret = size > old ? 0 : resize_bar1(pdev, old);
-	pci_assign_unassigned_bus_resources(pdev->bus);
-	if (!bars_assigned(pdev) && size > old) {
-		ret = resize_bar1(pdev, old);
-		pci_assign_unassigned_bus_resources(pdev->bus);
-	}
-	pci_write_config_word(pdev, PCI_COMMAND, cmd);
-	if (!ret && !bars_assigned(pdev))
-		ret = -ENODEV;
+	ret = pci_write_config_word(pdev, PCI_COMMAND, cmd & ~PCI_COMMAND_MEMORY);
 	if (ret) {
-		pci_err(pdev, "gpu_unlock: BAR1 resize failed: %d\n", ret);
-		return ret;
+		ret = pcibios_err_to_errno(ret);
+		goto out;
 	}
-	pci_info(pdev, "gpu_unlock: BAR1 resized to %llu MiB\n",
-		 (unsigned long long)(pci_resource_len(pdev, GU_BAR1) >> 20));
-	return 0;
+	ret = restore_bars(pdev, control, old, saved);
+	if (ret)
+		goto out;
+	for (size = fls64(sizes) - 1; size > old; size--) {
+		if (!(sizes & BIT_ULL(size)))
+			continue;
+		/* Older kernels require both resources released by the caller. */
+		for (i = 0; i < ARRAY_SIZE(resize_bars); i++)
+			pci_release_resource(pdev, resize_bars[i]);
+		ret = resize_bar1(pdev, size);
+		if (!ret) {
+			pci_assign_unassigned_bus_resources(pdev->bus);
+			if (bars_assigned(pdev))
+				break;
+			ret = -ENOSPC;
+		}
+		/* Reclaim the working windows before another attempt. If none of
+		 * the larger sizes fit, these are also the successful fallback. */
+		error = restore_bars(pdev, control, old, saved);
+		if (error) {
+			ret = error;
+			goto out;
+		}
+		if (ret != -ENOSPC)
+			break;
+		ret = 0;
+	}
+	error = pci_write_config_word(pdev, PCI_COMMAND, cmd);
+	if (!ret && error)
+		ret = pcibios_err_to_errno(error);
+	if (!ret)
+		pci_info(pdev, "gpu_unlock: BAR1 resized to %llu MiB\n",
+			 (unsigned long long)(pci_resource_len(pdev, GU_BAR1) >> 20));
+out:
+	if (ret)
+		pci_err(pdev, "gpu_unlock: BAR1 resize failed: %d\n", ret);
+	mutex_unlock(&bar1_lock);
+	return ret;
 }
