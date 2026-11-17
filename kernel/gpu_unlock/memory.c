@@ -226,11 +226,24 @@ int gu_memory_finalize(struct device *dev, void __iomem *bar, resource_size_t le
 		if (ret)
 			return ret;
 	} else if (family->memory == GU_MEMORY_GDDR) {
+		u64 published_bytes;
+
 		ret = memory_read(bar, len, GU_GFW_FB_SIZE_OFFSET, &published);
 		if (ret)
 			return ret;
-		if (((u64)published << 20) != result.usable_bytes)
+		published_bytes = (u64)published << 20;
+		/* Firmware may reserve framebuffer space below the encoded range.
+		 * Preserve its smaller usable size, but never advertise capacity
+		 * beyond the decoded range. The common minimum check follows. */
+		if (!published_bytes || published_bytes > result.usable_bytes) {
+			dev_err(dev, "gpu_unlock: invalid GFW memory size range=%#x decoded_usable=%#llx GFW_MiB=%#x\n",
+				range, (unsigned long long)result.usable_bytes, published);
 			return -ERANGE;
+		}
+		if (published_bytes != result.usable_bytes)
+			dev_info(dev, "gpu_unlock: preserving GFW usable memory range=%#x decoded_usable=%#llx GFW_MiB=%#x\n",
+				 range, (unsigned long long)result.usable_bytes, published);
+		result.usable_bytes = published_bytes;
 	}
 	if (result.usable_bytes < 256ull << 20)
 		return -ERANGE;
