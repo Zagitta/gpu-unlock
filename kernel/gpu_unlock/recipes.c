@@ -585,7 +585,7 @@ static const struct gu_family ga100 = {
 	.fuse = &ga100_fuse,
 	.selectors = GU_WRITE_TABLE(ampere_selectors),
 	.privileged = GU_WRITE_TABLE(ga100_privileged),
-	.rom = { .ecc = true, .p8_min_mhz = 135, .min_subrevision = 1 },
+	.rom = { .ecc = true, .p8_min_mhz = 135, .gpc_offset_mhz = 1000, .min_subrevision = 1 },
 	.p2p = true,
 	.relink = GU_WRITE_TABLE(ga100_relink),
 	.bar1 = GU_WRITE_TABLE(ga100_bar1),
@@ -602,7 +602,7 @@ static const struct gu_family ga100 = {
 /* A100 needs only host access for the existing HBM governor. */
 static const struct gu_family ga100_hbm = {
 	.name = "A100 80GB PCIe",
-	.rom = { .p8_min_mhz = 135 },
+	.rom = { .p8_min_mhz = 135, .gpc_offset_mhz = 1000 },
 	.memory = GU_MEMORY_RANGE,
 	.vram = GU_VRAM_HBM,
 	.fuse = &ga100_fuse,

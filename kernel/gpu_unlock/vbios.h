@@ -41,9 +41,13 @@ int gpu_unlock_vbios_fwsec(const u8 *rom, size_t length, struct gpu_unlock_fwsec
 int gpu_unlock_vbios_ecc_override(const u8 *rom, size_t length, u8 record[11]);
 /* Expand the TGP range in one record, preserving its factory default. Zero
  * keeps a bound; -EALREADY means the requested range is already available.
- * Update the working ROM and checksum so later P8 records compose with it. */
+ * Update the working ROM and checksum so subsequent records compose with it. */
 int gpu_unlock_vbios_power_overrides(u8 *rom, size_t length, u32 minimum_mw,
 				    u32 maximum_mw, u8 record[22], u8 checksum[11]);
+/* Enable +/- offset_mhz GPC offsets when the factory range is zero. Existing
+ * ranges are preserved (-EALREADY). Update the working ROM and checksum. */
+int gpu_unlock_vbios_gpc_offset_overrides(u8 *rom, size_t length, u16 offset_mhz,
+					 u8 record[14], u8 checksum[11]);
 /* Add GA100 P8 with the requested idle floors, plus its owning-image checksum.
  * Factory P0 and an existing P8 are preserved (-EALREADY). */
 int gpu_unlock_vbios_p8_overrides(const u8 *rom, size_t length, u16 minimum_mhz,

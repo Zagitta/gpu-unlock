@@ -178,6 +178,27 @@ static int capture_power(struct list_head *pending, struct pci_dev *pdev,
 	return ret;
 }
 
+static int capture_gpc_offset(struct list_head *pending, struct pci_dev *pdev,
+			      u8 *rom, size_t size, u16 offset_mhz)
+{
+	u8 data[14], checksum[11];
+	int ret = gpu_unlock_vbios_gpc_offset_overrides(rom, size, offset_mhz, data, checksum);
+
+	if (ret) {
+		if (ret == -EALREADY)
+			pci_info(pdev, "gpu_unlock: board VBIOS already provides a core-offset range\n");
+		else
+			pci_warn(pdev, "gpu_unlock: core-offset override unavailable for this VBIOS (%d)\n", ret);
+		return 0;
+	}
+	ret = add_override(pending, pdev, data, sizeof(data));
+	if (!ret)
+		ret = add_override(pending, pdev, checksum, sizeof(checksum));
+	if (!ret)
+		pci_info(pdev, "gpu_unlock: generated +/- %u MHz core-offset range; no offset selected\n", offset_mhz);
+	return ret;
+}
+
 static int capture_p8(struct list_head *pending, struct pci_dev *pdev,
 		      const u8 *rom, size_t size, u16 minimum_mhz)
 {
@@ -212,7 +233,8 @@ int gu_overrides_capture(const struct gu_device *device)
 	u8 *rom;
 	int ret;
 
-	if (!recipe->ecc && !recipe->p8_min_mhz && !card->power_min_mw && !card->power_max_mw)
+	if (!recipe->ecc && !recipe->p8_min_mhz && !recipe->gpc_offset_mhz &&
+	    !card->power_min_mw && !card->power_max_mw)
 		return 0;
 	bar = pci_iomap(pdev, 0, 0);
 	if (!bar)
@@ -252,6 +274,8 @@ int gu_overrides_capture(const struct gu_device *device)
 	ret = recipe->ecc ? capture_ecc(&pending, pdev, rom, size) : 0;
 	if (!ret && (card->power_min_mw || card->power_max_mw))
 		ret = capture_power(&pending, pdev, rom, size, card->power_min_mw, card->power_max_mw);
+	if (!ret && recipe->gpc_offset_mhz)
+		ret = capture_gpc_offset(&pending, pdev, rom, size, recipe->gpc_offset_mhz);
 	if (!ret && recipe->p8_min_mhz)
 		ret = capture_p8(&pending, pdev, rom, size, recipe->p8_min_mhz);
 	if (ret)

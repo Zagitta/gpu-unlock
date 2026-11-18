@@ -426,6 +426,16 @@ static void override_record(const struct override_image *image, u32 offset,
 	memcpy(record + 10, data, size);
 }
 
+static const u8 *override_table(const struct override_image *image, u32 pointer, u32 bytes)
+{
+	u32 offset = r32(image->rom + image->token + pointer);
+
+	if (!offset || offset > ~(u32)0 - image->adjust)
+		return NULL;
+	offset += image->adjust;
+	return range(image->length, offset, bytes) ? NULL : image->rom + offset;
+}
+
 int gpu_unlock_vbios_ecc_override(const u8 *rom, size_t length, u8 record[11])
 {
 	struct override_image image;
@@ -478,6 +488,22 @@ static int override_checksum(const struct override_image *image, u32 offset,
 	return -EINVAL;
 }
 
+/* Apply only generated records to the captured RAM copy. Each later edit
+ * starts from a valid image checksum including the preceding edits. */
+static int override_patch(u8 *rom, const struct override_image *image, u32 offset,
+			  const u8 *data, u8 size, u8 *record, u8 checksum[11])
+{
+	size_t base = image->rom - rom;
+	int ret = override_checksum(image, offset, data, size, checksum);
+
+	if (ret)
+		return ret;
+	override_record(image, offset, data, size, record);
+	memcpy(rom + base + offset, data, size);
+	rom[base + r32(checksum + 5)] = checksum[10];
+	return 0;
+}
+
 int gpu_unlock_vbios_power_overrides(u8 *rom, size_t length, u32 minimum_mw,
 				    u32 maximum_mw, u8 record[22], u8 checksum[11])
 {
@@ -485,7 +511,6 @@ int gpu_unlock_vbios_power_overrides(u8 *rom, size_t length, u32 minimum_mw,
 	const u8 *table, *entry;
 	u32 offset, minimum, rated, maximum;
 	u8 limits[12];
-	size_t base;
 	int ret;
 
 	if (!record || !checksum || (!minimum_mw && !maximum_mw) ||
@@ -494,13 +519,10 @@ int gpu_unlock_vbios_power_overrides(u8 *rom, size_t length, u32 minimum_mw,
 	ret = override_image(rom, length, 'P', 0x30, &image);
 	if (ret)
 		return ret;
-	offset = r32(image.rom + image.token + 0x2c);
-	if (!offset || offset > ~(u32)0 - image.adjust)
+	table = override_table(&image, 0x2c, 0x2c);
+	if (!table)
 		return -EINVAL;
-	offset += image.adjust;
-	if (range(image.length, offset, 0x2c))
-		return -EINVAL;
-	table = image.rom + offset;
+	offset = table - image.rom;
 	/* Reviewed GA100 power-policy 0x30 layout. The header selects TGP;
 	 * neither its row index nor the table's ROM offset is fixed. */
 	if (table[0] != 0x30 || table[1] != 0x2c || table[2] != 0x43 ||
@@ -526,17 +548,80 @@ int gpu_unlock_vbios_power_overrides(u8 *rom, size_t length, u32 minimum_mw,
 	w32(limits + 8, maximum);
 	if (!memcmp(entry + 2, limits, sizeof(limits)))
 		return -EALREADY;
-	offset += 2;
-	ret = override_checksum(&image, offset, limits, sizeof(limits), checksum);
+	return override_patch(rom, &image, offset + 2, limits, sizeof(limits), record, checksum);
+}
+
+int gpu_unlock_vbios_gpc_offset_overrides(u8 *rom, size_t length, u16 offset_mhz,
+					 u8 record[14], u8 checksum[11])
+{
+	struct override_image image, perf;
+	const u8 *clocks, *gpc, *programs, *table, *entry;
+	u32 offset, stride, i, p0 = 0;
+	u8 bounds[4];
+	int ret;
+
+	if (!record || !checksum || !offset_mhz || offset_mhz > 0x7fff)
+		return -EINVAL;
+	ret = override_image(rom, length, 'C', 0x10, &image);
 	if (ret)
 		return ret;
-	override_record(&image, offset, limits, sizeof(limits), record);
-	/* Capture owns this RAM copy. P8 must include the power change when
-	 * it calculates the same image's final checksum. */
-	base = image.rom - rom;
-	memcpy(rom + base + offset, limits, sizeof(limits));
-	rom[base + r32(checksum + 5)] = checksum[10];
-	return 0;
+	clocks = override_table(&image, 8, 9);
+	if (!clocks)
+		return -EINVAL;
+	/* HAL 3 identifies row zero as GPC; MASTER PARAM1 holds two signed
+	 * MHz bounds. FIXED and SLAVE rows have different PARAM1 meanings. */
+	if (memcmp(clocks, "\x35\x09\x0b\x0a\x03", 5) ||
+	    range(image.length, clocks - image.rom + 9, 10 * 11))
+		return -EOPNOTSUPP;
+	gpc = clocks + 9;
+	if ((gpc[0] & 0x1f) != 1)
+		return -EOPNOTSUPP;
+	programs = override_table(&image, 12, 11);
+	if (!programs)
+		return -EINVAL;
+	if (programs[0] != 0x35 || programs[1] != 11 || programs[2] != 13 ||
+	    memcmp(programs + 4, "\x03\x04\x02\x01\x02\x01", 6) ||
+	    gpc[1] > gpc[2] || gpc[2] >= programs[3])
+		return -EOPNOTSUPP;
+	stride = programs[2] + programs[4] * programs[5] +
+		 programs[7] * (programs[6] + programs[8] * programs[9]);
+	if (range(image.length, programs - image.rom + programs[1],
+		  (u32)programs[3] * stride))
+		return -EINVAL;
+	for (i = gpc[1]; i <= gpc[2]; i++) {
+		entry = programs + programs[1] + i * stride;
+		/* The client VF interface also requires OC-enabled MASTER programs. */
+		if ((entry[0] & 0xf) > 1 || !(entry[0] & 0x80))
+			return -EOPNOTSUPP;
+	}
+	ret = override_image(rom, length, 'P', 4, &perf);
+	if (ret)
+		return ret;
+	table = override_table(&perf, 0, 10);
+	if (!table)
+		return -EINVAL;
+	if (table[0] != 0x60 || table[1] != 10 || table[2] != 5 ||
+	    !table[3] || table[4] != 6 || table[5] != 10 ||
+	    range(perf.length, table - perf.rom + 10, (u32)table[3] * 65))
+		return -EOPNOTSUPP;
+	for (i = 0; i < table[3]; i++) {
+		entry = table + 10 + i * 65;
+		if (entry[0] != 15)
+			continue;
+		if (p0++)
+			return -EBADMSG;
+		if (!(entry[1] & 8))
+			return -EOPNOTSUPP;
+	}
+	if (!p0)
+		return -EOPNOTSUPP;
+	if ((r16(gpc + 3) && !(r16(gpc + 3) & 0x8000)) || (r16(gpc + 5) & 0x8000))
+		return -EBADMSG;
+	if (r32(gpc + 3))
+		return -EALREADY;
+	w32(bounds, (0x10000u - offset_mhz) | ((u32)offset_mhz << 16));
+	offset = gpc - image.rom + 3;
+	return override_patch(rom, &image, offset, bounds, sizeof(bounds), record, checksum);
 }
 
 int gpu_unlock_vbios_p8_overrides(const u8 *rom, size_t length, u16 minimum_mhz,
@@ -554,12 +639,10 @@ int gpu_unlock_vbios_p8_overrides(const u8 *rom, size_t length, u16 minimum_mhz,
 	ret = override_image(rom, length, 'P', 4, &image);
 	if (ret)
 		return ret;
-	if (r32(image.rom + image.token) > ~(u32)0 - image.adjust)
+	table = override_table(&image, 0, 10);
+	if (!table)
 		return -EINVAL;
-	offset = image.adjust + r32(image.rom + image.token);
-	if (!offset || range(image.length, offset, 10))
-		return -EINVAL;
-	table = image.rom + offset;
+	offset = table - image.rom;
 	/* Only the inspected GA100 performance 0x60 layout is supported. */
 	if (table[0] != 0x60 || table[1] != 10 || table[2] != 5 ||
 	    !table[3] || table[4] != 6 || table[5] != 10 ||

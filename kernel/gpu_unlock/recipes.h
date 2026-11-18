@@ -88,6 +88,7 @@ enum gu_vram {
 struct gu_rom_recipe {
 	bool ecc;
 	u16 p8_min_mhz; /* optional P8 override; zero leaves the board policy alone */
+	u16 gpc_offset_mhz; /* enable offsets only when the factory range is zero */
 	u8 min_subrevision; /* silicon prerequisite for this override bundle */
 };
 

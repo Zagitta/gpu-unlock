@@ -11,7 +11,7 @@
  * framing, EFI placement, BIT stride, table offsets and the selected TGP row. */
 struct fixture {
 	u8 rom[0x6000];
-	u32 base, adjust, power, entry, perf, end, bit, token;
+	u32 base, adjust, power, entry, perf, clocks, programs, end, bit, token;
 	u8 version[5];
 };
 
@@ -72,6 +72,8 @@ static void fixture(struct fixture *f, bool container, bool efi, u8 stride,
 	f->power = table + f->adjust;
 	f->entry = f->power + 0x2c + tgp * 0x43;
 	f->perf = 0x800 + f->adjust;
+	f->clocks = 0x1a00 + f->adjust;
+	f->programs = 0x1b00 + f->adjust;
 	f->end = 0x2400 + f->adjust;
 	f->bit = 0x50;
 	f->token = stride == 8 ? 0x1c0 : 0x140;
@@ -92,7 +94,7 @@ static void fixture(struct fixture *f, bool container, bool efi, u8 stride,
 	bit = rom + f->bit;
 	memcpy(bit, "\xff\xb8" "BIT\0\x00\x01\x0c", 9);
 	bit[9] = stride;
-	bit[10] = 2;
+	bit[10] = 3;
 	bit[11] = -sum(bit, 12);
 	token = bit + 12;
 	token[0] = 'B';
@@ -111,6 +113,20 @@ static void fixture(struct fixture *f, bool container, bool efi, u8 stride,
 	write16(token + 4, f->token);
 	write32(rom + f->token, 0x800);
 	write32(rom + f->token + 0x2c, table);
+	token += stride;
+	token[0] = 'C';
+	token[1] = 2;
+	write16(token + 2, 0x10);
+	write16(token + 4, 0x220);
+	write32(rom + 0x228, 0x1a00);
+	write32(rom + 0x22c, 0x1b00);
+	memcpy(rom + f->clocks, "\x35\x09\x0b\x0a\x03\xe8\x03\x00\x00", 9);
+	rom[f->clocks + 9] = 1;
+	rom[f->clocks + 10] = 1;
+	rom[f->clocks + 11] = 2; /* Two GPC programs, neither at index zero. */
+	memcpy(rom + f->programs, "\x35\x0b\x0d\x03\x03\x04\x02\x01\x02\x01\x00", 11);
+	rom[f->programs + 11 + 29] = 0xa0;
+	rom[f->programs + 11 + 58] = 0xa0;
 	memcpy(rom + f->power, "\x30\x2c\x43\x04", 4);
 	rom[f->power + 10] = tgp;
 	rom[f->entry] = 1;
@@ -142,7 +158,7 @@ static void supported(void)
 {
 	for (unsigned int variant = 0; variant < 8; variant++) {
 		struct fixture original, working, applied;
-		u8 power[22], check[11], p8[75], p8_check[11];
+		u8 power[22], check[11], offset[14], offset_check[11], p8[75], p8_check[11];
 		u32 minimum = variant & 1 ? 150000 : 100000;
 		u32 rated = variant & 1 ? 300000 : 250000;
 		u32 maximum = variant & 1 ? 300000 : 250000;
@@ -169,6 +185,15 @@ static void supported(void)
 				continue;
 			assert(working.rom[i] == original.rom[i]);
 		}
+		assert(!gpu_unlock_vbios_gpc_offset_overrides(working.rom, sizeof(working.rom),
+			1000, offset, offset_check));
+		assert(read32(offset + 5) == original.clocks + 12 && offset[9] == 4);
+		assert(!memcmp(offset + 10, "\x18\xfc\xe8\x03", 4));
+		apply(&applied, offset, sizeof(offset));
+		apply(&applied, offset_check, sizeof(offset_check));
+		assert(!memcmp(working.rom, applied.rom, sizeof(working.rom)));
+		assert(gpu_unlock_vbios_gpc_offset_overrides(working.rom, sizeof(working.rom),
+			1000, offset, offset_check) == -EALREADY);
 		assert(!gpu_unlock_vbios_p8_overrides(working.rom, sizeof(working.rom),
 			135, p8, p8_check));
 		apply(&applied, p8, sizeof(p8));
@@ -177,6 +202,8 @@ static void supported(void)
 		assert(read32(applied.rom + original.base + original.entry + 2) == 100000);
 		assert(read32(applied.rom + original.base + original.entry + 6) == rated);
 		assert(read32(applied.rom + original.base + original.entry + 10) == 300000);
+		assert(!memcmp(applied.rom + original.base + original.clocks + 12,
+			"\x18\xfc\xe8\x03", 4));
 		assert(!memcmp(applied.rom + original.base + original.perf + 10 + 65 * 3,
 			original.rom + original.base + original.perf + 10 + 65 * 3, 65));
 		assert(gpu_unlock_vbios_power_overrides(working.rom, sizeof(working.rom),
@@ -242,11 +269,81 @@ static void rejected(void)
 	assert(!memcmp(&f, &before, sizeof(f)));
 }
 
+static void offset_preserved(void)
+{
+	struct fixture f, before;
+	u8 offset[14], check[11], p8[75], p8_check[11];
+
+	fixture(&f, false, false, 6, 0x1000, 2, 100000, 250000, 300000);
+	for (unsigned int i = 0; i < 3; i++) {
+		/* Native, asymmetric and negative-only factory ranges are retained. */
+		write16(f.rom + f.clocks + 12, i == 0 ? (u16)-1000 : (u16)-250);
+		write16(f.rom + f.clocks + 14, i == 0 ? 1000 : i == 1 ? 500 : 0);
+		checksum(&f);
+		before = f;
+		assert(gpu_unlock_vbios_gpc_offset_overrides(f.rom, sizeof(f.rom),
+			1000, offset, check) == -EALREADY);
+		assert(!memcmp(&f, &before, sizeof(f)));
+	}
+	write32(f.rom + f.clocks + 12, 0);
+	f.rom[f.perf + 10] = 7; /* Existing P8 does not block the offset change. */
+	checksum(&f);
+	assert(!gpu_unlock_vbios_gpc_offset_overrides(f.rom, sizeof(f.rom), 1000, offset, check));
+	assert(gpu_unlock_vbios_p8_overrides(f.rom, sizeof(f.rom), 135, p8, p8_check) == -EALREADY);
+	assert(!sum(f.rom + 0x400, 0x2000));
+}
+
+static void offset_rejected(void)
+{
+	struct fixture valid, f, before;
+	u8 offset[14], check[11];
+
+	fixture(&valid, true, true, 8, 0x1500, 2, 150000, 300000, 300000);
+	for (unsigned int variant = 0; variant < 21; variant++) {
+		u8 *rom;
+		size_t length = sizeof(f.rom);
+		f = valid;
+		rom = f.rom + f.base;
+		switch (variant) {
+		case 0: rom[f.clocks] = 0x40; break;
+		case 1: rom[f.clocks + 1] = 7; break;
+		case 2: rom[f.clocks + 2] = 9; break;
+		case 3: rom[f.clocks + 3] = 9; break;
+		case 4: rom[f.clocks + 4] = 4; break;
+		case 5: rom[f.clocks + 9] = 0; break;
+		case 6: rom[f.clocks + 9] = 2; break;
+		case 7: rom[f.clocks + 10] = 3; break;
+		case 8: rom[f.clocks + 11] = 3; break;
+		case 9: rom[f.programs + 11 + 58] &= ~0x80; break;
+		case 10: rom[f.programs + 11 + 29] = 0xaf; break;
+		case 11: rom[f.perf + 10 + 65 * 3 + 1] &= ~8; break;
+		case 12: rom[f.perf + 10 + 65 * 3] = 0xff; break;
+		case 13: rom[f.perf + 10] = 15; rom[f.perf + 11] = 8; break;
+		case 14: write16(rom + f.clocks + 12, 100); break;
+		case 15: write16(rom + f.clocks + 14, (u16)-100); break;
+		case 16: write32(rom + 0x228, 0xffffffff); break;
+		case 17: write32(rom + 0x22c, 0); break;
+		case 18: rom[f.programs + 2] = 5; break;
+		case 19: length = f.base + f.programs + 20; break;
+		case 20: rom[f.end - 1]++; break;
+		}
+		before = f;
+		assert(gpu_unlock_vbios_gpc_offset_overrides(f.rom, length, 1000, offset, check) < 0);
+		assert(!memcmp(&f, &before, sizeof(f)));
+	}
+	f = before = valid;
+	assert(gpu_unlock_vbios_gpc_offset_overrides(f.rom, sizeof(f.rom), 0, offset, check) == -EINVAL);
+	assert(gpu_unlock_vbios_gpc_offset_overrides(f.rom, sizeof(f.rom), 0x8000, offset, check) == -EINVAL);
+	assert(!memcmp(&f, &before, sizeof(f)));
+}
+
 int main(void)
 {
 	supported();
 	preserved();
 	rejected();
-	puts("VBIOS power overrides: relocated tables, version guards, bounds and P8 composition passed");
+	offset_preserved();
+	offset_rejected();
+	puts("VBIOS power/core-offset overrides: relocated tables, OC gates, factory ranges and P8 composition passed");
 	return 0;
 }
