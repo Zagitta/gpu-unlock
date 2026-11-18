@@ -675,8 +675,9 @@ static const struct gu_family tu102 = {
 #define TU104(id) { .device = id, .chip = 0x164, .family = &tu102 }
 #define TU106(id) { .device = id, .chip = 0x166, .family = &tu102 }
 
-#define GA100(id, config) \
-	{ .device = id, .chip = 0x170, .family = &ga100, .privileged = GU_WRITE_TABLE(config) }
+#define GA100(id, config, max_mw) \
+	{ .device = id, .chip = 0x170, .family = &ga100, .privileged = GU_WRITE_TABLE(config), \
+	  .power_max_mw = max_mw }
 #define GA102(id) { .device = id, .chip = 0x172, .family = &ga10x }
 #define GA103(id) { .device = id, .chip = 0x173, .family = &ga10x }
 #define GA104(id) { .device = id, .chip = 0x174, .family = &ga10x }
@@ -684,9 +685,9 @@ static const struct gu_family tu102 = {
 
 static const struct gu_card cards[] = {
 	/* GA100: CMP 170HX 8GB, CMP 170HX 10GB */
-	GA100(0x20c2, cmp170hx_8gb_geometry), GA100(0x2082, cmp170hx_10gb_geometry),
+	GA100(0x20c2, cmp170hx_8gb_geometry, 0), GA100(0x2082, cmp170hx_10gb_geometry, 300000),
 	
-	{ .device = 0x20b5, .chip = 0x170, .family = &ga100_hbm },
+	{ .device = 0x20b5, .chip = 0x170, .family = &ga100_hbm, .power_min_mw = 100000 },
 
 	/* TU102: RTX 2080 Ti, Titan RTX */
 	TU102(0x1e03), TU102(0x1e04), TU102(0x1e07), TU102(0x1e2d),

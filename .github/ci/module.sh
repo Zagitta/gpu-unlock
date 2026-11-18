@@ -26,6 +26,7 @@ arch)
 esac
 sh tests/pm/runtime.sh
 sh tests/pcie/bar1.sh
+sh tests/vbios/power.sh
 # The same headers can show up under more than one of these paths.
 built=
 for kdir in /usr/src/linux-headers-*-amd64 /usr/src/linux-headers-*-generic \

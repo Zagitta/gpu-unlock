@@ -120,6 +120,8 @@ struct gu_card {
 	u32 chip; /* PMC_BOOT_0 architecture + implementation */
 	const struct gu_family *family;
 	struct gu_write_table privileged; /* final suffix; geometry prevents relaunch */
+	/* Optional TGP range expansion; zero preserves the board's bound. */
+	u32 power_min_mw, power_max_mw;
 };
 /* All writes verify a nonzero mask. RMW keeps the bits selected by kept. */
 #define GU_WRITE(reg, val) \

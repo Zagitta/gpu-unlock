@@ -110,3 +110,5 @@ tests/pcie/bar1.c
 tests/pcie/bar1.sh
 tests/pm/runtime.c
 tests/pm/runtime.sh
+tests/vbios/power.c
+tests/vbios/power.sh

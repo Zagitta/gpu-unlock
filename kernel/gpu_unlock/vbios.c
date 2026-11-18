@@ -478,6 +478,67 @@ static int override_checksum(const struct override_image *image, u32 offset,
 	return -EINVAL;
 }
 
+int gpu_unlock_vbios_power_overrides(u8 *rom, size_t length, u32 minimum_mw,
+				    u32 maximum_mw, u8 record[22], u8 checksum[11])
+{
+	struct override_image image;
+	const u8 *table, *entry;
+	u32 offset, minimum, rated, maximum;
+	u8 limits[12];
+	size_t base;
+	int ret;
+
+	if (!record || !checksum || (!minimum_mw && !maximum_mw) ||
+	    (minimum_mw && maximum_mw && minimum_mw > maximum_mw))
+		return -EINVAL;
+	ret = override_image(rom, length, 'P', 0x30, &image);
+	if (ret)
+		return ret;
+	offset = r32(image.rom + image.token + 0x2c);
+	if (!offset || offset > ~(u32)0 - image.adjust)
+		return -EINVAL;
+	offset += image.adjust;
+	if (range(image.length, offset, 0x2c))
+		return -EINVAL;
+	table = image.rom + offset;
+	/* Reviewed GA100 power-policy 0x30 layout. The header selects TGP;
+	 * neither its row index nor the table's ROM offset is fixed. */
+	if (table[0] != 0x30 || table[1] != 0x2c || table[2] != 0x43 ||
+	    table[10] >= table[3] ||
+	    range(image.length, offset + 0x2c, (u32)table[2] * table[3]))
+		return -EOPNOTSUPP;
+	offset += table[1] + (u32)table[2] * table[10];
+	entry = image.rom + offset;
+	/* TOTAL_GPU policy, power units (mW), including the extended class. */
+	if ((entry[0] & 0x1f) != 1 || (entry[0x42] & 0xf))
+		return -EOPNOTSUPP;
+	minimum = r32(entry + 2);
+	rated = r32(entry + 6);
+	maximum = r32(entry + 10);
+	if (!minimum || minimum > rated || rated > maximum)
+		return -EBADMSG;
+	if (minimum_mw && minimum_mw < minimum)
+		minimum = minimum_mw;
+	if (maximum_mw && maximum_mw > maximum)
+		maximum = maximum_mw;
+	w32(limits, minimum);
+	w32(limits + 4, rated);
+	w32(limits + 8, maximum);
+	if (!memcmp(entry + 2, limits, sizeof(limits)))
+		return -EALREADY;
+	offset += 2;
+	ret = override_checksum(&image, offset, limits, sizeof(limits), checksum);
+	if (ret)
+		return ret;
+	override_record(&image, offset, limits, sizeof(limits), record);
+	/* Capture owns this RAM copy. P8 must include the power change when
+	 * it calculates the same image's final checksum. */
+	base = image.rom - rom;
+	memcpy(rom + base + offset, limits, sizeof(limits));
+	rom[base + r32(checksum + 5)] = checksum[10];
+	return 0;
+}
+
 int gpu_unlock_vbios_p8_overrides(const u8 *rom, size_t length, u16 minimum_mhz,
 				 u8 record[75], u8 checksum[11])
 {

@@ -156,6 +156,28 @@ static int capture_ecc(struct list_head *pending, struct pci_dev *pdev,
 	return ret;
 }
 
+static int capture_power(struct list_head *pending, struct pci_dev *pdev,
+			 u8 *rom, size_t size, u32 minimum_mw, u32 maximum_mw)
+{
+	u8 power[22], checksum[11];
+	int ret = gpu_unlock_vbios_power_overrides(rom, size, minimum_mw, maximum_mw,
+						 power, checksum);
+
+	if (ret) {
+		if (ret == -EALREADY)
+			pci_info(pdev, "gpu_unlock: board VBIOS already provides the requested power range\n");
+		else
+			pci_warn(pdev, "gpu_unlock: power-limit override unavailable for this VBIOS (%d)\n", ret);
+		return 0;
+	}
+	ret = add_override(pending, pdev, power, sizeof(power));
+	if (!ret)
+		ret = add_override(pending, pdev, checksum, sizeof(checksum));
+	if (!ret)
+		pci_info(pdev, "gpu_unlock: generated power-limit override with factory default preserved\n");
+	return ret;
+}
+
 static int capture_p8(struct list_head *pending, struct pci_dev *pdev,
 		      const u8 *rom, size_t size, u16 minimum_mhz)
 {
@@ -181,6 +203,7 @@ static int capture_p8(struct list_head *pending, struct pci_dev *pdev,
 int gu_overrides_capture(const struct gu_device *device)
 {
 	struct pci_dev *pdev = device->pdev;
+	const struct gu_card *card = device->recipe;
 	const struct gu_rom_recipe *recipe = &device->recipe->family->rom;
 	resource_size_t len = pci_resource_len(pdev, 0);
 	LIST_HEAD(pending);
@@ -189,7 +212,7 @@ int gu_overrides_capture(const struct gu_device *device)
 	u8 *rom;
 	int ret;
 
-	if (!recipe->ecc && !recipe->p8_min_mhz)
+	if (!recipe->ecc && !recipe->p8_min_mhz && !card->power_min_mw && !card->power_max_mw)
 		return 0;
 	bar = pci_iomap(pdev, 0, 0);
 	if (!bar)
@@ -227,6 +250,8 @@ int gu_overrides_capture(const struct gu_device *device)
 	}
 	memcpy_fromio(rom, bar + GU_PROM_DATA_OFFSET, size);
 	ret = recipe->ecc ? capture_ecc(&pending, pdev, rom, size) : 0;
+	if (!ret && (card->power_min_mw || card->power_max_mw))
+		ret = capture_power(&pending, pdev, rom, size, card->power_min_mw, card->power_max_mw);
 	if (!ret && recipe->p8_min_mhz)
 		ret = capture_p8(&pending, pdev, rom, size, recipe->p8_min_mhz);
 	if (ret)
