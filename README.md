@@ -77,7 +77,7 @@ Real workloads:
 | Gaming and FP32 CUDA | No change |
 
 Outputs are bit-identical before and after; only the speed changes. These
-numbers come from the [compatibility reports](https://github.com/Zagitta/gpu-unlock/issues)
+numbers come from the [compatibility reports](https://github.com/Zagitta/gpu-unlock/discussions/238)
 users have filed, where you can find full benchmark details and post your own.
 
 ---
