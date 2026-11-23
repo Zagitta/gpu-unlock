@@ -42,6 +42,10 @@ static bool vram_temps = true;
 module_param(vram_temps, bool, 0444);
 MODULE_PARM_DESC(vram_temps, "Report the VRAM temperatures of supported cards through hwmon, unlocked or not (default: on)");
 
+int bar1_max_exp = -1;
+module_param(bar1_max_exp, int, 0444);
+MODULE_PARM_DESC(bar1_max_exp, "Cap the advertised BAR1 size ladder at 2^N MB (default: -1, no cap)");
+
 /* A target card. Those unlocked at boot stay listed, with a reference, to be
  * unlocked again after each resume. */
 struct card {

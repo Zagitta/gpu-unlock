@@ -269,6 +269,17 @@ X11 does this whatever its option ROM and bus master settings) is cleared
 first; a card some driver already initialised is still refused. Then
 `nvidia` loads and binds every card as usual.
 
+The BAR1 resize ladder can be capped when the size it would ask for is not
+available, for example on a board whose firmware has already programmed a larger
+BAR1 than the ladder default: the resize is then refused by the kernel and the
+card is left with an unreadable MMIO block until the next power cycle. Setting
+`gpu_unlock.bar1_max_exp` at or below the programmed size makes the resize a
+no-op and keeps what the firmware assigned:
+
+```
+gpu_unlock.bar1_max_exp=14       # ladder tops out at 16GB, never asks for more
+```
+
 The display card works too. Its firmware framebuffer (the boot console and
 Plymouth) keeps running while the unlock's firmware steps run, and is
 removed just before the card's reset, as `nvidia-drm` would do a moment
