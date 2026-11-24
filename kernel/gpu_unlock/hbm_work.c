@@ -164,6 +164,7 @@ static void sample(struct gu_hbm_worker *worker)
 static void poll(struct work_struct *work)
 {
 	struct gu_hbm_worker *worker = container_of(work, struct gu_hbm_worker, work.work);
+	unsigned int delay = GU_HBM_POLL_MS;
 	int pm;
 
 	if (READ_ONCE(worker->paused) || READ_ONCE(worker->stopping) ||
@@ -175,6 +176,8 @@ static void poll(struct work_struct *work)
 			if (worker->last_access)
 				pci_dbg(worker->pdev, "gpu_unlock: HBM PCI access resumed\n");
 			sample(worker);
+			if (worker->last_error && worker->last_error != -EAGAIN)
+				delay = GU_HBM_RETRY_MS;
 			end(worker, pm);
 		} else {
 			if (pm != worker->last_access)
@@ -185,7 +188,7 @@ static void poll(struct work_struct *work)
 		worker->last_access = pm < 0 ? pm : 0;
 		device_unlock(&worker->pdev->dev);
 	}
-	queue(worker, msecs_to_jiffies(GU_HBM_POLL_MS));
+	queue(worker, msecs_to_jiffies(delay));
 }
 
 static void restore_locked(struct gu_hbm_worker *worker)

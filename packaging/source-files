@@ -104,6 +104,8 @@ packaging/unraid/discover.sh
 packaging/unraid/gpu-unlock-firmware
 packaging/unraid/gpu-unlock.plg
 tests/docker.sh
+tests/hbm/governor.c
+tests/hbm/governor.sh
 tests/packaging/install.sh
 tests/packaging/source.sh
 tests/pcie/bar1.c

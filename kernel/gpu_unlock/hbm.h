@@ -5,6 +5,8 @@
 #include <linux/io.h>
 
 #define GU_HBM_POLL_MS 20
+/* A failed switch held every CPU for nothing: do not repeat it at the poll rate. */
+#define GU_HBM_RETRY_MS 1000
 #define GU_HBM_IDLE_NS 100000000ull
 #define GU_HBM_IDLE_NDIV 20u
 #define GU_HBM_IDLE_PLDIV 1u
