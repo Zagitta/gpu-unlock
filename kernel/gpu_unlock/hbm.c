@@ -3,6 +3,7 @@
 #include <linux/errno.h>
 #include <linux/delay.h>
 #include <linux/io.h>
+#include <linux/stop_machine.h>
 #include <linux/string.h>
 
 #include "hbm.h"
@@ -34,6 +35,10 @@
 #define COUNT_MASK      0x7fffffffu
 /* Stay well below a 31-bit counter wrap even at the highest PMU clock. */
 #define MAX_SAMPLE_NS   1000000000ull
+/* The PLL locks within the first few of the settle reads. Every CPU is held
+ * while it is polled, so give up long before the wait could be noticed. */
+#define SETTLE_READS    500u
+#define LOCK_POLLS      1000u
 
 static const u32 counter_addr[] = {
 	0x10be40, 0x10be80, 0x10bec0, 0x10bfc0, 0x10be00,
@@ -180,7 +185,7 @@ static int pll_wait(struct gu_hbm *hbm, void __iomem *bar, u32 coeff,
 
 		if (!(hbm->fbpas & (1u << i)))
 			continue;
-		for (poll = 0; poll < 200000; poll++) {
+		for (poll = 0; poll < LOCK_POLLS; poll++) {
 			reg = fbpa(i) + PLL_CFG;
 			value = readl(bar + reg);
 			if (!readable(value) ||
@@ -191,7 +196,7 @@ static int pll_wait(struct gu_hbm *hbm, void __iomem *bar, u32 coeff,
 			if (value == coeff)
 				break;
 		}
-		if (poll == 200000)
+		if (poll == LOCK_POLLS)
 			return problem(hbm, -ETIMEDOUT, phase, reg, value);
 	}
 	return 0;
@@ -222,7 +227,7 @@ static int set_clock(struct gu_hbm *hbm, void __iomem *bar, bool idle)
 		udelay(2);
 	}
 	pll_write(bar, PLL_COEFF_MC2, value);
-	for (i = 0; i < 500; i++)
+	for (i = 0; i < SETTLE_READS; i++)
 		readl(bar + hbm->first_fbpa + PLL_CFG);
 	ret = pll_wait(hbm, bar, value, bypass, "HBM PLL lock/coefficient timeout");
 	if (ret)
@@ -242,7 +247,7 @@ rollback:
 		udelay(2);
 	}
 	pll_write(bar, PLL_COEFF_MC2, old);
-	for (i = 0; i < 500; i++)
+	for (i = 0; i < SETTLE_READS; i++)
 		readl(bar + hbm->first_fbpa + PLL_CFG);
 	if (bypass) {
 		pll_write(bar, PLL_CFG_MC2, cfg);
@@ -318,8 +323,18 @@ static int fb_start(struct gu_hbm *hbm, void __iomem *bar)
 	return ret;
 }
 
-static int transition(struct gu_hbm *hbm, void __iomem *bar, bool idle)
+struct gu_hbm_switch {
+	struct gu_hbm *hbm;
+	void __iomem *bar;
+	bool idle;
+};
+
+static int switch_profile(void *data)
 {
+	struct gu_hbm_switch *work = data;
+	struct gu_hbm *hbm = work->hbm;
+	void __iomem *bar = work->bar;
+	bool idle = work->idle;
 	int ret = fb_stop(hbm, bar), resumed;
 
 	if (!ret)
@@ -344,6 +359,16 @@ static int transition(struct gu_hbm *hbm, void __iomem *bar, bool idle)
 	}
 	resumed = fb_start(hbm, bar);
 	return resumed ? resumed : ret;
+}
+
+/* A client that reaches the card from another CPU while the framebuffer is
+ * stopped can be left hung or faulted, and stalls the reads here for tens of
+ * milliseconds. Hold the other CPUs for the two milliseconds a switch takes. */
+static int transition(struct gu_hbm *hbm, void __iomem *bar, bool idle)
+{
+	struct gu_hbm_switch work = { .hbm = hbm, .bar = bar, .idle = idle };
+
+	return stop_machine(switch_profile, &work, NULL);
 }
 
 int gu_hbm_restore(struct gu_hbm *hbm, void __iomem *bar)

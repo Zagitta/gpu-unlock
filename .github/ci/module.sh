@@ -24,6 +24,7 @@ arch)
 	echo "unknown distribution: $ID" >&2
 	exit 1 ;;
 esac
+sh tests/hbm/governor.sh
 sh tests/pm/runtime.sh
 sh tests/pcie/bar1.sh
 sh tests/vbios/power.sh

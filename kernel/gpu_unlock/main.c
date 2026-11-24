@@ -42,6 +42,10 @@ static bool vram_temps = true;
 module_param(vram_temps, bool, 0444);
 MODULE_PARM_DESC(vram_temps, "Report the VRAM temperatures of supported cards through hwmon, unlocked or not (default: on)");
 
+static bool hbm_governor = true;
+module_param(hbm_governor, bool, 0444);
+MODULE_PARM_DESC(hbm_governor, "Lower the HBM clock of unlocked cards while they are idle (default: on)");
+
 /* A target card. Those unlocked at boot stay listed, with a reference, to be
  * unlocked again after each resume. */
 struct card {
@@ -448,7 +452,7 @@ static int unlock_targets(void)
 		if (!card->unlocked)
 			drop_card(card);
 	list_for_each_entry(card, &cards, node) {
-		if (card->device.recipe->family->vram == GU_VRAM_HBM) {
+		if (hbm_governor && card->device.recipe->family->vram == GU_VRAM_HBM) {
 			card->hbm = gu_hbm_start(card->device.pdev);
 			if (IS_ERR(card->hbm)) {
 				ret = PTR_ERR(card->hbm);
