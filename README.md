@@ -173,6 +173,39 @@ dry-run and verified apply modes. This is a separate, persistent InfoROM write
 using NVFlash; **it requires the GPU to be unbound and NVIDIA modules unloaded**.
 Run `python3 tools/patch_inforom.py --help` for the available modes.
 
+## PCIe P2P
+
+The module opens the GPU's side of NVIDIA's native mailbox P2P path; the kernel log
+shows `gpu_unlock: PCIe P2P mailbox permissions and read override enabled` for each
+card. The NVIDIA driver separately decides whether the *platform* supports P2P, from
+its own chipset list. Check both directions after a reboot:
+
+```sh
+nvidia-smi topo -p2p r
+nvidia-smi topo -p2p w
+```
+
+- `OK`: nothing else to do.
+- `GNS` (GPU not supported): the card was not unlocked; check the kernel log.
+- `CNS` (chipset not supported): the driver does not recognise the platform. Desktop
+  boards can report this even with both GPUs on CPU root ports (seen on B660). The
+  driver's `ForceP2P` registry key skips that check. Add to `/etc/modprobe.d/`:
+
+  ```text
+  options nvidia NVreg_RegistryDwords="ForceP2P=0x11"
+  ```
+
+  then reboot (rebuild the initramfs first if NVIDIA loads from it). `0x11` turns on
+  P2P reads (bits 1:0) and writes (bits 5:4) and leaves atomics off. If you already
+  pass `NVreg_RegistryDwords`, append `;ForceP2P=0x11` to that value instead of
+  adding a second line.
+
+`ForceP2P` overrides every driver check, including the GPU one, so only use it on
+cards this module unlocked. It does not make the platform route peer traffic either:
+verify data integrity before relying on it, for example with
+[p2p-integrity](https://github.com/noon-at-cgn/geforce-dynbar1-p2p/tree/main/contrib/integrity),
+which also tests kernel loads and stores through peer pointers, not just copies.
+
 # FAQ
 
 - Q: Do you have a website/coin/installer?  
