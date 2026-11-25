@@ -23,7 +23,7 @@ to redo when NVIDIA releases a new driver.
 
 | Generation                | Cards                                                                                                                  | Status                    |
 | ------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------- |
-| **Ampere** (RTX 30)       | RTX 3050, 3060, 3060 Ti, 3070, 3070 Ti, 3080, 3080 Ti, 3090, 3090 Ti, plus RTX 3070/3080 Laptop GPUs                   | Stable, 100+ user reports |
+| **Ampere** (RTX 30)       | RTX 3050, 3060, 3060 Ti, 3070, 3070 Ti, 3080, 3080 Ti, 3090, 3090 Ti, plus RTX 3050/3070/3080 Laptop GPUs             | Stable, 100+ user reports |
 | **Ada Lovelace** (RTX 40) | RTX 4060, 4060 Ti, 4070, 4070 SUPER, 4070 Ti, 4070 Ti SUPER, 4080, 4080 SUPER, 4090, 4090 D, RTX 4050/4060 Laptop GPUs | Experimental              |
 | **Turing** (RTX 20)       | RTX 2060, 2060 SUPER, 2070, 2070 SUPER, 2080, 2080 SUPER, 2080 Ti, Titan RTX                                           | Experimental              |
 | Blackwell (RTX 50)        |                                                                                                                        | Not supported             |
@@ -32,6 +32,13 @@ Laptops only stay unlocked if the dedicated GPU is never fully powered off.
 Many laptops power it down when idle, which silently resets the unlock. Turning  
 off runtime power management with `options nvidia NVreg_DynamicPowerManagement=0x00`
 in `/etc/modprobe.d/` helps on some models, but expect mixed results.
+
+On a Lenovo RTX 3050 6 GB Laptop (GA107, `10de:25ec`, subsystem `17aa:3c90`) the
+boot-time unlock does not survive `nvidia`'s own probe-time GSP-RM re-init, but
+the existing resume re-unlock does, confirmed via MMIO readback and a CUDA
+register-MMA microbenchmark (~100% BF16 gain). See
+[case study](docs/Extending%20to%20a%20new%20laptop%20GPU.md) for the general
+procedure this followed when adding this board.
 
 The exact PCI device IDs are in [`kernel/gpu_unlock/recipes.c`](kernel/gpu_unlock/recipes.c).
 Linux only. For Windows see the [FAQ](#faq).
