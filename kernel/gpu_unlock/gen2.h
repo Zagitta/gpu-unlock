@@ -15,6 +15,10 @@ int gu_pcie_gen2_config(struct pci_dev *pdev, const struct gu_pcie_gen2 *cfg);
  */
 void gu_pcie_gen2_schedule(struct pci_dev *pdev, const struct gu_pcie_gen2 *cfg);
 
+/* Same as gu_pcie_gen2_schedule(), but uses the shorter resume delay. */
+void gu_pcie_gen2_schedule_resume(struct pci_dev *pdev,
+				  const struct gu_pcie_gen2 *cfg);
+
 /* Cancel the pending repeats (module exit). */
 void gu_pcie_gen2_cancel(void);
 

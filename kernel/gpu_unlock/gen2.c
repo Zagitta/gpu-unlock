@@ -29,14 +29,21 @@ module_param(gen2_delay_ms, uint, 0444);
 MODULE_PARM_DESC(gen2_delay_ms,
 		 "delay before repeating the PCIe Gen2 pass after a card is unlocked (0 disables it)");
 
+/* After resume the driver has already probed the card, so the link can be
+ * re-trained much sooner than on a cold boot. */
+static unsigned int gen2_resume_delay_ms = 5000;
+module_param(gen2_resume_delay_ms, uint, 0444);
+MODULE_PARM_DESC(gen2_resume_delay_ms,
+		 "delay before repeating the PCIe Gen2 pass after resume (0 disables it)");
+
 #define GEN2_RETRAIN_ROUNDS	5
 #define GEN2_RETRAIN_POLLS	10
 #define GEN2_RETRAIN_POLL_MS	100
 #define GEN2_LATE_RETRIES	30
 #define GEN2_LATE_RETRY_MS	2000
 
-/* One work item per card, kept until module exit. The work never detaches
- * itself; gu_pcie_gen2_cancel() cancels it and drops the reference.
+/* One work item per scheduled pass, kept until module exit. The work never
+ * detaches itself; gu_pcie_gen2_cancel() cancels it and drops the reference.
  */
 struct gen2_late {
 	struct list_head node;
@@ -207,11 +214,13 @@ static void gen2_late_work(struct work_struct *work)
 }
 
 /* Repeat the pass once the stock driver has finished its own link setup. */
-void gu_pcie_gen2_schedule(struct pci_dev *pdev, const struct gu_pcie_gen2 *cfg)
+static void gen2_schedule_delay(struct pci_dev *pdev,
+				const struct gu_pcie_gen2 *cfg,
+				unsigned int delay_ms)
 {
 	struct gen2_late *late;
 
-	if (!pdev || !cfg || !gen2_delay_ms)
+	if (!pdev || !cfg || !delay_ms)
 		return;
 	late = kzalloc(sizeof(*late), GFP_KERNEL);
 	if (!late)
@@ -223,12 +232,23 @@ void gu_pcie_gen2_schedule(struct pci_dev *pdev, const struct gu_pcie_gen2 *cfg)
 	list_add_tail(&late->node, &gen2_late_list);
 	mutex_unlock(&gen2_late_lock);
 	queue_delayed_work(system_freezable_wq, &late->work,
-			   msecs_to_jiffies(gen2_delay_ms));
+			   msecs_to_jiffies(delay_ms));
 }
 
-/* Called from module exit only. Init cannot overlap exit, so no entry can be
- * added while the list is walked; cancel_delayed_work_sync() waits for a work
- * that is already running.
+void gu_pcie_gen2_schedule(struct pci_dev *pdev, const struct gu_pcie_gen2 *cfg)
+{
+	gen2_schedule_delay(pdev, cfg, gen2_delay_ms);
+}
+
+void gu_pcie_gen2_schedule_resume(struct pci_dev *pdev,
+				  const struct gu_pcie_gen2 *cfg)
+{
+	gen2_schedule_delay(pdev, cfg, gen2_resume_delay_ms);
+}
+
+/* Called from module exit after the PM notifier is unregistered, so no new
+ * entry can be added while the list is walked; cancel_delayed_work_sync()
+ * waits for a work that is already running.
  */
 void gu_pcie_gen2_cancel(void)
 {
