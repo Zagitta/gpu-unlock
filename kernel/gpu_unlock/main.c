@@ -10,6 +10,7 @@
 
 #include "unlock_610.h"
 #include "recipes.h"
+#include "gen2.h"
 
 static char *targets;
 module_param(targets, charp, 0444);
@@ -57,6 +58,16 @@ static void unlock_one(void *data, async_cookie_t cookie)
 		pci_err(pdev, "gpu_unlock: unlock failed (%d)\n", ret);
 	else
 		pci_info(pdev, "gpu_unlock: unlocked\n");
+	if (!ret && card->device.recipe->family->gen2) {
+		const struct gu_pcie_gen2 *gen2 = card->device.recipe->family->gen2;
+		int rc = gu_pcie_gen2_config(pdev, gen2);
+
+		if (rc)
+			pci_err(pdev, "gpu_unlock: PCIe Gen2 config failed (%d)\n", rc);
+		else
+			pci_info(pdev, "gpu_unlock: PCIe Gen2 configured\n");
+		gu_pcie_gen2_schedule(pdev, gen2);
+	}
 	card->unlocked = !ret;
 }
 
@@ -82,6 +93,21 @@ static void unlock_again(void *data, async_cookie_t cookie)
 		pci_err(pdev, "gpu_unlock: unlock after resume failed (%d)\n", ret);
 	else
 		pci_info(pdev, "gpu_unlock: unlocked again after resume\n");
+
+	/* The PCIe selectors can be reset by suspend-to-RAM even when the
+	 * compute unlock survived. Re-apply Gen2 after every resume where the
+	 * card is bound to nvidia (ret == 0 or -EALREADY). */
+	if (nvidia && (ret == 0 || ret == -EALREADY) &&
+	    card->device.recipe->family->gen2) {
+		const struct gu_pcie_gen2 *gen2 = card->device.recipe->family->gen2;
+		int rc = gu_pcie_gen2_config(pdev, gen2);
+
+		if (rc)
+			pci_err(pdev, "gpu_unlock: PCIe Gen2 after resume failed (%d)\n", rc);
+		else
+			pci_info(pdev, "gpu_unlock: PCIe Gen2 after resume configured\n");
+		gu_pcie_gen2_schedule_resume(pdev, gen2);
+	}
 }
 
 /* Prepare all selected firmware families, then run the ready cards concurrently. */
@@ -205,6 +231,7 @@ static void __exit gpu_unlock_exit(void)
 
 	if (!list_empty(&cards))
 		unregister_pm_notifier(&pm_nb);
+	gu_pcie_gen2_cancel();
 	list_for_each_entry_safe(card, next, &cards, node)
 		drop_card(card);
 }

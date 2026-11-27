@@ -33,6 +33,31 @@ Many laptops power it down when idle, which silently resets the unlock. Turning
 off runtime power management with `options nvidia NVreg_DynamicPowerManagement=0x00`
 in `/etc/modprobe.d/` helps on some models, but expect mixed results.
 
+### CMP 90HX (GA102 mining card)
+
+The CMP 90HX (`10de:220d` / subsystem `1555`) is a GA102-100 mining card with
+10 GB of GDDR6X on a 320-bit bus and no display outputs. It gets a dedicated
+recipe: the compute unlock uses the same V67 chain, and the family also opens
+the two PCIe privilege masks (`FEAT_OVR_ECC_PLM` and XVE) and programs the
+Gen2 speed path before the driver loads. GSP-RM re-programs the link during
+its own init, so the pass is repeated by a delayed work after the driver has
+probed the card (`gen2_delay_ms`, default 30000). Suspend-to-RAM resets the
+selectors as well, so `unlock_again()` re-applies Gen2 with a shorter delay
+(`gen2_resume_delay_ms`, default 5000).
+
+The card is fused to PCIe x4 (x16 needs the missing lane capacitors
+soldered), so Gen2 doubles the host bandwidth. The V67 compute unlock, the RT
+pipeline, 2:4 sparse and INT4 tensor-op GEMMs work; NVENC/NVDEC/NVJPG/OFA,
+ECC, MIG, NVLink and SR-IOV are absent, and there is no 12 GB variant. Some
+large GEMM tiles do not fit the 100 KB shared memory per SM.
+
+As with the other GA10x recipes, the compute path leaves the `WPR_CFG` and
+`FEAT` privilege masks open until power off. A direct-mode variant that avoids
+this would need a CMP-specific adaptation, because the Gen2 path also uses the
+ECC/XVE masks.
+
+Experimental, validated on one card with the open modules 620.73.04.
+
 The exact PCI device IDs are in [`kernel/gpu_unlock/recipes.c`](kernel/gpu_unlock/recipes.c).
 Linux only. For Windows see the [FAQ](#faq).
 
