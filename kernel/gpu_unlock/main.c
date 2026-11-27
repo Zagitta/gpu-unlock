@@ -10,6 +10,7 @@
 
 #include "unlock_610.h"
 #include "recipes.h"
+#include "gen2.h"
 
 static char *targets;
 module_param(targets, charp, 0444);
@@ -57,6 +58,16 @@ static void unlock_one(void *data, async_cookie_t cookie)
 		pci_err(pdev, "gpu_unlock: unlock failed (%d)\n", ret);
 	else
 		pci_info(pdev, "gpu_unlock: unlocked\n");
+	if (!ret && card->device.recipe->family->gen2) {
+		const struct gu_pcie_gen2 *gen2 = card->device.recipe->family->gen2;
+		int rc = gu_pcie_gen2_config(pdev, gen2);
+
+		if (rc)
+			pci_err(pdev, "gpu_unlock: PCIe Gen2 config failed (%d)\n", rc);
+		else
+			pci_info(pdev, "gpu_unlock: PCIe Gen2 configured\n");
+		gu_pcie_gen2_schedule(pdev, gen2);
+	}
 	card->unlocked = !ret;
 }
 
@@ -202,6 +213,8 @@ static int __init gpu_unlock_init(void)
 static void __exit gpu_unlock_exit(void)
 {
 	struct card *card, *next;
+
+	gu_pcie_gen2_cancel();
 
 	if (!list_empty(&cards))
 		unregister_pm_notifier(&pm_nb);

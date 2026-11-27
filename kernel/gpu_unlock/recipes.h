@@ -22,6 +22,19 @@
 
 struct gu_write_table { const struct gu_reg_write *entries; size_t count; };
 
+/* PCIe Gen2 speed path for a card whose link is fused to Gen1. The two
+ * privilege masks must read all ones before any register below is touched;
+ * the payload opens them as privileged writes. All values are BAR0 offsets.
+ */
+struct gu_pcie_gen2 {
+	u32 ecc_mask, xve_mask;
+	u32 priv_misc_1, priv_misc_1_set, priv_misc_1_clr;
+	u32 cya_0, cya_0_clr;
+	struct gu_reg_write xp3g[4]; /* absolute VAL/OVR writes, in order */
+	u32 link_config_0, link_config_0_mask, link_config_0_value;
+	u32 ltssm, ltssm_value;
+};
+
 /* Header fields that differ between signed Booter images. The common checks
  * stay in the validator. */
 struct gu_booter_expect {
@@ -62,6 +75,7 @@ struct gu_family {
 	u8 fwsec_version;
 	u32 feat_plm, feat_ss0, feat_ss1;
 	bool turing_layout; /* VBIOS FB-range register and no MMU lock */
+	const struct gu_pcie_gen2 *gen2; /* optional PCIe Gen2 speed path */
 };
 struct gu_card {
 	u16 device;

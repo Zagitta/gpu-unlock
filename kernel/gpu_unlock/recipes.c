@@ -330,6 +330,56 @@ static const struct gu_family ga100 = {
 	.feat_ss0 = GU_FEAT_SS0_OFFSET,
 	.feat_ss1 = GU_FEAT_SS1_OFFSET,
 };
+
+#define CMP90_ECC_MASK	0x00823800U
+#define CMP90_XVE_MASK	0x00088fe8U
+
+static const struct gu_reg_write ga10x_cmp90_plm[] = {
+	{ GU_WPR_CFG_PLM_OFFSET,	0xfffff0ff },
+	{ GU_FEAT_PLM_OFFSET,		0xffffffff },
+	{ CMP90_ECC_MASK,	0xffffffff }, /* FEAT_OVR_ECC_PLM */
+	{ CMP90_XVE_MASK,	0xffffffff }, /* XVE PLM: PRIV_MISC_1 + LTSSM */
+};
+
+/* The CMP 90HX is a GA102-100 mining card; its VBIOS fuses the PCIe link to
+ * Gen1. Opening the two masks above lets the sequence below reprogram the
+ * speed path. Values from jdowning100/cmpunlocker rejoin16.
+ */
+static const struct gu_pcie_gen2 ga10x_cmp90_gen2 = {
+	.ecc_mask = CMP90_ECC_MASK,
+	.xve_mask = CMP90_XVE_MASK,
+	.priv_misc_1 = 0x008841cU,
+	.priv_misc_1_set = (1U << 11) | (1U << 13),
+	.priv_misc_1_clr = (1U << 12) | (1U << 14),
+	.cya_0 = 0x008c2c0U,
+	.cya_0_clr = 1U << 2,
+	.xp3g = {
+		{ 0x008e120U, 0x00000000U }, /* XP3G_VAL0 */
+		{ 0x008e110U, 0x00000001U }, /* XP3G_OVR0 */
+		{ 0x008e12cU, 0x00200000U }, /* XP3G_VAL3 */
+		{ 0x008e11cU, 0x00000004U }, /* XP3G_OVR3 */
+	},
+	.link_config_0 = 0x008c040U,
+	.link_config_0_mask = 0x000c0000U,
+	.link_config_0_value = 2U << 18, /* MAX_RATE = Gen2 */
+	.ltssm = 0x008872cU,
+	.ltssm_value = 0x00000006U,
+};
+
+static const struct gu_family ga10x_cmp90 = {
+	.name = "CMP 90HX (GA102-100)",
+	.privileged = GU_WRITE_TABLE(ga10x_cmp90_plm),
+	.host = GU_WRITE_TABLE(selectors),
+	.fw = &ga10x_fw,
+	.booter = &sec2_ga102,
+	.loader = NULL,
+	.fwsec_version = 3,
+	.feat_plm = GU_FEAT_PLM_OFFSET,
+	.feat_ss0 = GU_FEAT_SS0_OFFSET,
+	.feat_ss1 = GU_FEAT_SS1_OFFSET,
+	.gen2 = &ga10x_cmp90_gen2,
+};
+
 static const struct gu_family ga10x = {
 	.name = "GA102/GA103/GA104/GA106",
 	.privileged = GU_WRITE_TABLE(ga10x_plm),
@@ -380,6 +430,7 @@ static const struct gu_family tu102 = {
 
 #define GA100(id) { id, 0x170, &ga100 }
 #define GA102(id) { id, 0x172, &ga10x }
+#define CMP90(id) { id, 0x172, &ga10x_cmp90 }
 #define GA103(id) { id, 0x173, &ga10x }
 #define GA104(id) { id, 0x174, &ga10x }
 #define GA106(id) { id, 0x176, &ga10x }
@@ -416,7 +467,7 @@ static const struct gu_card cards[] = {
 
 	GA102(0x2200), GA102(0x2203), GA102(0x2204), GA102(0x2205),
 	GA102(0x2206), GA102(0x2207), GA102(0x2208), GA102(0x220a),
-	GA102(0x220d), GA102(0x2216), GA102(0x222b), GA102(0x222f),
+	CMP90(0x220d), GA102(0x2216), GA102(0x222b), GA102(0x222f),
 
 	GA103(0x2414),
 
