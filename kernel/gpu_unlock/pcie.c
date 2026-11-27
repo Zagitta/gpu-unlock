@@ -412,6 +412,16 @@ int gu_pcie_bar1_resize(struct pci_dev *pdev, void __iomem *bar, resource_size_t
 	ret = gu_host_writes(&pdev->dev, bar, len, &family->bar1, "bar1");
 	if (ret)
 		goto out;
+	if (bar1_max_exp >= 0) {
+		/* XVE REBAR: bit 31 opens the full ladder, the low bits are the
+		 * top exponent in MB.  Resizing above what is already assigned is
+		 * refused by the kernel (-EIO) and leaves the device's MMIO block
+		 * unreadable, so let the ladder be capped: with the cap at or
+		 * below the current size no larger size is offered and the loop
+		 * below does nothing. */
+		writel(0x80000000u | ((u32)bar1_max_exp & 0x1fu),
+		       bar + GU_XVE_BAR1_REBAR_OFFSET);
+	}
 	sizes = pci_rebar_get_possible_sizes(pdev, GU_BAR1);
 
 	/* The kernel requires memory decoding off while BARs move. */

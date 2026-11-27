@@ -7,6 +7,10 @@
 struct gu_family;
 struct pci_dev;
 
+/* Cap on the advertised BAR1 size ladder, 2^N MB; negative (the default)
+ * leaves the recipe's ladder alone. Set as gpu_unlock.bar1_max_exp. */
+extern int bar1_max_exp;
+
 /* Verify the P2P read override installed by the privileged recipe. Disable
  * the trap if its effective readback does not match. */
 int gu_pcie_p2p_check(struct pci_dev *pdev, void __iomem *bar, resource_size_t len);
