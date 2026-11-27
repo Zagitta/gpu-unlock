@@ -51,6 +51,11 @@ pipeline, 2:4 sparse and INT4 tensor-op GEMMs work; NVENC/NVDEC/NVJPG/OFA,
 ECC, MIG, NVLink and SR-IOV are absent, and there is no 12 GB variant. Some
 large GEMM tiles do not fit the 100 KB shared memory per SM.
 
+As with the other GA10x recipes, the compute path leaves the `WPR_CFG` and
+`FEAT` privilege masks open until power off. A direct-mode variant that avoids
+this would need a CMP-specific adaptation, because the Gen2 path also uses the
+ECC/XVE masks.
+
 Experimental, validated on one card with the open modules 620.73.04.
 
 The exact PCI device IDs are in [`kernel/gpu_unlock/recipes.c`](kernel/gpu_unlock/recipes.c).
