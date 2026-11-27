@@ -292,7 +292,7 @@ struct gu_hbm_worker *gu_hbm_start(struct pci_dev *pdev)
 	pci_info(pdev, "gpu_unlock: HBM governor registered mode=%s idle_ms=%llu poll_ms=%u idle_ndiv=%u idle_pldiv=%u idle_refresh=%u transition=fb-stop/bypass\n",
 		 mode_name(worker->hbm.policy.mode),
 		 (unsigned long long)(GU_HBM_IDLE_NS / 1000000), GU_HBM_POLL_MS,
-		 GU_HBM_IDLE_NDIV, GU_HBM_IDLE_PLDIV, GU_HBM_IDLE_REFRESH);
+		 gu_hbm_idle_ndiv(), GU_HBM_IDLE_PLDIV, GU_HBM_IDLE_REFRESH);
 	pci_dev_lock(pdev);
 	WRITE_ONCE(worker->bound, nvidia(pdev));
 	pci_dev_unlock(pdev);

@@ -6,7 +6,7 @@
 
 #define GU_HBM_POLL_MS 20
 #define GU_HBM_IDLE_NS 100000000ull
-#define GU_HBM_IDLE_NDIV 20u
+#define GU_HBM_IDLE_NDIV 28u
 #define GU_HBM_IDLE_PLDIV 1u
 #define GU_HBM_IDLE_REFRESH 48u
 
@@ -19,6 +19,9 @@ enum gu_hbm_mode {
 struct gu_hbm_policy {
 	u32 ndiv, pldiv, refresh, idle_ms;
 	enum gu_hbm_mode mode;
+	/* Stop the framebuffer around a transition. Off = PLL/refresh only,
+	 * which is the only form usable while a client holds the device. */
+	bool fb_stop;
 };
 
 struct gu_hbm_counter {
@@ -40,6 +43,8 @@ struct gu_hbm {
 /* Called with PCI access held. Only poll and restore write registers. */
 bool gu_hbm_booted(void __iomem *bar);
 void gu_hbm_init(struct gu_hbm *hbm);
+unsigned int gu_hbm_idle_ndiv(void);
+
 int gu_hbm_poll(struct gu_hbm *hbm, void __iomem *bar, u64 now);
 int gu_hbm_restore(struct gu_hbm *hbm, void __iomem *bar);
 void gu_hbm_reset(struct gu_hbm *hbm);
