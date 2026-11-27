@@ -290,6 +290,17 @@ CMP 170HX link retraining runs after NVIDIA has initialized the card. Add
 `/sys/module/gpu_unlock/parameters/resume`, to turn this off. Hibernation is
 not covered.
 
+On HBM cards the activity governor lowers the memory clock once the card has
+been quiet for `gpu_unlock.idle_ms` (default 100 ms) and restores it the
+moment work appears. The idle point is `gpu_unlock.idle_ndiv`, the feedback
+divider of the idle memory clock: the clock is `NDIV x 27 MHz`, 28 by default
+(756 MHz). It can also be written at runtime through
+`/sys/module/gpu_unlock/parameters/idle_ndiv`; the next quiet window moves
+the card to the new point. `gpu_unlock.stop_fb=0` leaves the framebuffer
+running across a transition and writes the PLL and refresh registers only,
+which is the only form usable while a client holds the device. A `0` for
+`idle_ms` keeps the card at its busy clock entirely.
+
 Check the result with:
 
 ```sh

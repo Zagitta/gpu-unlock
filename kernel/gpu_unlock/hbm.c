@@ -3,10 +3,28 @@
 #include <linux/errno.h>
 #include <linux/delay.h>
 #include <linux/io.h>
+#include <linux/module.h>
 #include <linux/string.h>
 
 #include "hbm.h"
 #include "registers.h"
+
+/* Runtime-tunable idle threshold. 0 disables entering HBM idle entirely. */
+static unsigned int idle_ms = 100;
+module_param(idle_ms, uint, 0644);
+MODULE_PARM_DESC(idle_ms, "HBM idle threshold in ms (0 = never enter idle)");
+/* 1 (default): quiesce the framebuffer around each transition. 0: write the
+ * PLL and refresh registers only; the FB stop is what fails to resume while
+ * a client holds the GPU, so 0 makes idle transitions possible under load. */
+static bool stop_fb = true;
+module_param(stop_fb, bool, 0644);
+MODULE_PARM_DESC(stop_fb, "Quiesce the framebuffer around each HBM idle transition (default: on)");
+/* Idle HBM NDIV; memory clock = NDIV x 27 MHz (busy is NDIV 64 on this part).
+ * Raising it narrows the idle->busy swing, which is the transition that fails
+ * under load.  Read live, so it can be swept without a reload. */
+static unsigned int idle_ndiv = GU_HBM_IDLE_NDIV;
+module_param(idle_ndiv, uint, 0644);
+MODULE_PARM_DESC(idle_ndiv, "Idle HBM NDIV (memory clock = NDIV x 27 MHz)");
 
 #define FBPA_BASE       0x00900000u
 #define FBPA_STRIDE     0x00004000u
@@ -69,7 +87,7 @@ void gu_hbm_init(struct gu_hbm *hbm)
 	hbm->policy = (struct gu_hbm_policy) {
 		.ndiv = GU_HBM_IDLE_NDIV, .pldiv = GU_HBM_IDLE_PLDIV,
 		.refresh = GU_HBM_IDLE_REFRESH, .idle_ms = GU_HBM_IDLE_NS / 1000000,
-		.mode = GU_HBM_AUTO,
+		.mode = GU_HBM_AUTO, .fb_stop = stop_fb,
 	};
 }
 
@@ -309,8 +327,16 @@ static int fb_start(struct gu_hbm *hbm, void __iomem *bar)
 	writel(0, bar + PRI_FENCE);
 	ndelay(20);
 	writel(FB_STOP, bar + FB_STOP_CLEAR);
-	request = readl(bar + FB_STOP_OUTPUT);
-	if (!readable(request) || (request & FB_STOP))
+	/* LOCAL: poll for the clear instead of failing on the first read. */
+	for (i = 0; i < 200; i++) {
+		request = readl(bar + FB_STOP_OUTPUT);
+		if (!readable(request))
+			return problem(hbm, -EIO, "HBM FB resume request unreadable", FB_STOP_OUTPUT, request);
+		if (!(request & FB_STOP))
+			break;
+		udelay(10);
+	}
+	if (request & FB_STOP)
 		return problem(hbm, -EIO, "HBM FB resume request did not clear", FB_STOP_OUTPUT, request);
 	ret = fb_wait(hbm, bar, false);
 	if (!ret)
@@ -320,7 +346,8 @@ static int fb_start(struct gu_hbm *hbm, void __iomem *bar)
 
 static int transition(struct gu_hbm *hbm, void __iomem *bar, bool idle)
 {
-	int ret = fb_stop(hbm, bar), resumed;
+	bool stop = hbm->policy.fb_stop;
+	int ret = stop ? fb_stop(hbm, bar) : 0, resumed;
 
 	if (!ret)
 		ret = refresh(hbm, bar, idle, true);
@@ -328,7 +355,7 @@ static int transition(struct gu_hbm *hbm, void __iomem *bar, bool idle)
 		ret = set_clock(hbm, bar, idle);
 	if (!ret)
 		ret = refresh(hbm, bar, idle, false);
-	if (!hbm->fb_stopped)
+	if (!stop || !hbm->fb_stopped)
 		return ret;
 	if (ret) {
 		u32 coeff = readl(bar + hbm->first_fbpa + PLL_COEFF);
@@ -433,6 +460,11 @@ static bool discover_counters(struct gu_hbm *hbm, void __iomem *bar)
 	return true;
 }
 
+unsigned int gu_hbm_idle_ndiv(void)
+{
+	return READ_ONCE(idle_ndiv);
+}
+
 int gu_hbm_poll(struct gu_hbm *hbm, void __iomem *bar, u64 now)
 {
 	bool busy = false;
@@ -505,7 +537,28 @@ int gu_hbm_poll(struct gu_hbm *hbm, void __iomem *bar, u64 now)
 		hbm->quiet_since = now;
 		return gu_hbm_restore(hbm, bar);
 	}
-	if (!hbm->idle && now - hbm->quiet_since >= (u64)hbm->policy.idle_ms * 1000000)
+	/* LOCAL: pick up a changed idle NDIV.  A coefficient already programmed
+	 * is no longer one set_clock() recognises once policy.ndiv moves, so
+	 * leave the old idle point the way a wake does and let the quiet window
+	 * re-enter with the new one. */
+	{
+		unsigned int ndiv = READ_ONCE(idle_ndiv);
+
+		if (ndiv > 0xff)
+			ndiv = 0xff;
+		if (ndiv && ndiv != hbm->policy.ndiv) {
+			int leave = 0;
+
+			hbm->policy.ndiv = ndiv;
+			if (hbm->idle)
+				leave = gu_hbm_restore(hbm, bar);
+			if (leave)
+				return leave;
+		}
+	}
+	if (!READ_ONCE(idle_ms))
+		return (hbm->idle || hbm->fb_stopped) ? gu_hbm_restore(hbm, bar) : 0;
+	if (!hbm->idle && now - hbm->quiet_since >= (u64)READ_ONCE(idle_ms) * 1000000)
 		return enter_idle(hbm, bar);
 	return 0;
 unknown:
